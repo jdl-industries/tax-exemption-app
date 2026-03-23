@@ -1,0 +1,62 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "53dcc5ea76c760db129006423c8fc296"
+name = "jdl-tax-exemption"
+application_url = "https://example.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+
+[webhooks]
+api_version = "2026-04"
+
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+uri = "/webhooks/app/uninstalled"
+
+[[webhooks.subscriptions]]
+topics = [ "app/scopes_update" ]
+uri = "/webhooks/app/scopes_update"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_customers, write_customers, write_files"
+use_protected_customer_data_level = 1
+protected_customer_data_access_reason = "To display and manage customer tax exemption metafields"
+
+[auth]
+redirect_urls = [ "https://example.com/api/auth" ]
+
+[customer.metafields.tax_exemption.tax_exemption_type]
+type = "single_line_text_field"
+name = "Tax Exemption Type"
+description = "The reason this customer is tax exempt"
+access.customer_account = "read_write"
+access.admin = "merchant_read_write"
+[customer.metafields.tax_exemption.tax_exemption_type.validations]
+choices = ["Resale", "Government/Military", "Manufacturing/Industrial", "Other"]
+
+# File type metafield for the tax exemption certificate
+[customer.metafields.tax_exemption.tax_exemption_certificate]
+type = "file_reference"
+name = "Tax Exemption Certificate"
+description = "Uploaded tax exemption document"
+access.customer_account = "read_write"
+access.admin = "merchant_read_write"
+
+[customer.metafields.tax_exemption.tax_exemption_certification_expiration]
+type = "date"
+name = "Tax Exemption Expiration"
+description = "The date when the tax exemption certificate expires"
+access.customer_account = "read_write"
+access.admin = "merchant_read_write"
+
+# Boolean type metafield for the attestation
+[customer.metafields.tax_exemption.tax_exemption_attestation]
+type = "boolean"
+name = "Tax Exemption Attestation"
+description = "Customer confirmation of tax exempt status"
+access.customer_account = "read_write"
+access.admin = "merchant_read_write"

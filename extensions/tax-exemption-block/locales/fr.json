@@ -1,9 +1,29 @@
 {
-  "preferenceCard": {
+  "taxExemptionCard": {
     "heading": "Exonération fiscale",
+    "add": "Ajouter",
     "edit": "Modifier le type d'exonération fiscale",
     "modalHeading": "Modifier l'exonération fiscale",
     "cancel": "Annuler",
-    "save": "Enregistrer"
+    "save": "Enregistrer",
+    "noExemptionInfo": "Aucune documentation d'exonération fiscale ajoutée",
+    "statusLabel": "Statut",
+    "typeLabel": "Type d'exonération fiscale",
+    "notSet": "Non défini",
+    "certificateLabel": "Certificat d'exonération fiscale",
+    "attestationLabel": "En téléchargeant ce document, vous certifiez que le certificat est valide, non expiré et couvre la ou les juridictions de votre adresse de livraison. Tous les certificats sont soumis à un examen manuel avant que le statut d'exonération fiscale ne soit accordé.",
+    "uploaded": "Téléchargé",
+    "uploading": "Téléchargement...",
+    "certificateUploadedSuccessfully": "Certificat téléchargé avec succès",
+    "certificateUploadFailed": "Échec du téléchargement du certificat : {uploadError}",
+    "notUploaded": "Non téléchargé",
+    "expirationLabel": "Date d'expiration",
+    "selectType": "Sélectionnez un type...",
+    "resale": "Revente",
+    "governmentMilitary": "Gouvernement/Militaire",
+    "manufacturingIndustrial": "Fabrication/Industriel",
+    "other": "Autre",
+    "underReview": "En cours de révision",
+    "approved": "Approuvé"
   }
 }

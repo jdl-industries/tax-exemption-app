@@ -13,10 +13,10 @@ export default async () => {
     taxExemptionCertificate,
     taxExemptionAttestation,
     taxExemptionExpiration,
-  } = await getCustomerPreferences();
+  } = await getTaxExemptionFields();
 
   render(
-    <ProfilePreferenceExtension
+    <TaxExemptionBlock
       customerId={customerId}
       taxExemptionType={taxExemptionType}
       taxExemptionCertificate={taxExemptionCertificate}
@@ -27,7 +27,7 @@ export default async () => {
   );
 };
 
-function ProfilePreferenceExtension(props) {
+function TaxExemptionBlock(props) {
   const { i18n } = shopify;
   const modalRef = useRef();
   const [loading, setLoading] = useState(false);
@@ -174,7 +174,7 @@ function ProfilePreferenceExtension(props) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    const { type, attestation } = await saveCustomerPreferences(
+    const { type, attestation } = await saveTaxExemptionFields(
       props.customerId,
       newTaxExemptionType,
       newTaxExemptionAttestation,
@@ -204,10 +204,10 @@ function ProfilePreferenceExtension(props) {
         <s-stack direction="block" gap="large-200">
           <s-heading>
             <s-stack direction="inline" gap="large-300">
-              <s-text>{i18n.translate("preferenceCard.heading")}</s-text>
+              <s-text>{i18n.translate("taxExemptionCard.heading")}</s-text>
               {showExemptView ? (
                 <s-clickable
-                  aria-label={i18n.translate("preferenceCard.edit")}
+                  aria-label={i18n.translate("taxExemptionCard.edit")}
                   command="--show"
                   commandFor="profile-preference-modal"
                 >
@@ -220,7 +220,9 @@ function ProfilePreferenceExtension(props) {
                   command="--show"
                   commandFor="profile-preference-modal"
                 >
-                  <s-text tone="custom">+ Add</s-text>
+                  <s-text tone="custom">
+                    + {i18n.translate("taxExemptionCard.add")}
+                  </s-text>
                 </s-clickable>
               )}
             </s-stack>
@@ -229,27 +231,39 @@ function ProfilePreferenceExtension(props) {
           {showExemptView ? (
             /* Exempt state: show all fields */
             <>
-              <s-stack direction="block" gap="small-500">
-                <s-text color="subdued">Status</s-text>
+              <s-stack direction="block">
+                <s-text color="subdued">
+                  {i18n.translate("taxExemptionCard.statusLabel")}
+                </s-text>
                 <s-text>{status}</s-text>
               </s-stack>
-              <s-stack direction="block" gap="small-500">
-                <s-text color="subdued">Tax exemption type</s-text>
-                <s-text>{taxExemptionType || "Not set"}</s-text>
-              </s-stack>
-              <s-stack direction="block" gap="small-500">
-                <s-text color="subdued">Certificate</s-text>
+              <s-stack direction="block">
+                <s-text color="subdued">
+                  {i18n.translate("taxExemptionCard.typeLabel")}
+                </s-text>
                 <s-text>
-                  {taxExemptionCertificate ? "Uploaded" : "Not uploaded"}
+                  {taxExemptionType ||
+                    i18n.translate("taxExemptionCard.notSet")}
                 </s-text>
               </s-stack>
-              <s-stack direction="block" gap="small-500">
-                <s-text color="subdued">Attestation</s-text>
-                <s-text>{taxExemptionAttestation ? "Yes" : "No"}</s-text>
+              <s-stack direction="block">
+                <s-text color="subdued">
+                  {i18n.translate("taxExemptionCard.certificateLabel")}
+                </s-text>
+                <s-text>
+                  {taxExemptionCertificate
+                    ? i18n.translate("taxExemptionCard.uploaded")
+                    : i18n.translate("taxExemptionCard.notUploaded")}
+                </s-text>
               </s-stack>
-              <s-stack direction="block" gap="small-500">
-                <s-text color="subdued">Expiration</s-text>
-                <s-text>{props.taxExemptionExpiration || "Not set"}</s-text>
+              <s-stack direction="block">
+                <s-text color="subdued">
+                  {i18n.translate("taxExemptionCard.expirationLabel")}
+                </s-text>
+                <s-text>
+                  {props.taxExemptionExpiration ||
+                    i18n.translate("taxExemptionCard.notSet")}
+                </s-text>
               </s-stack>
             </>
           ) : (
@@ -264,7 +278,9 @@ function ProfilePreferenceExtension(props) {
                 gap="base"
               >
                 <s-icon type="info" />
-                <s-paragraph>No tax exemption documentation added</s-paragraph>
+                <s-paragraph>
+                  {i18n.translate("taxExemptionCard.noExemptionInfo")}
+                </s-paragraph>
               </s-stack>
             </>
           )}
@@ -274,50 +290,67 @@ function ProfilePreferenceExtension(props) {
       <s-modal
         id="profile-preference-modal"
         ref={modalRef}
-        heading={i18n.translate("preferenceCard.modalHeading")}
+        heading={i18n.translate("taxExemptionCard.modalHeading")}
       >
         <s-form onSubmit={handleSubmit}>
           <s-stack direction="block" gap="large">
             <s-stack direction="block" gap="base">
               <s-select
-                label="Tax exemption type"
+                label={i18n.translate("taxExemptionCard.typeLabel")}
                 value={newTaxExemptionType}
                 onChange={(e) => setNewTaxExemptionType(e.target.value)}
               >
-                <s-option value="">Select a type...</s-option>
-                <s-option value="Resale">Resale</s-option>
+                <s-option value="">
+                  {i18n.translate("taxExemptionCard.selectType")}
+                </s-option>
+                <s-option value="Resale">
+                  {i18n.translate("taxExemptionCard.resale")}
+                </s-option>
                 <s-option value="Government/Military">
-                  Government/Military
+                  {i18n.translate("taxExemptionCard.governmentMilitary")}
                 </s-option>
                 <s-option value="Manufacturing/Industrial">
-                  Manufacturing/Industrial
+                  {i18n.translate("taxExemptionCard.manufacturingIndustrial")}
                 </s-option>
-                <s-option value="Other">Other</s-option>
+                <s-option value="Other">
+                  {i18n.translate("taxExemptionCard.other")}
+                </s-option>
               </s-select>
 
               <s-drop-zone
-                label="Tax exemption certificate"
-                accessibilityLabel="Upload PDF, JPG, PNG, or GIF file"
+                label={i18n.translate("taxExemptionCard.certificateLabel")}
+                accessibilityLabel={i18n.translate(
+                  "taxExemptionCard.certificateLabel",
+                )}
                 accept=".pdf,.jpg,.jpeg,.png,.gif"
                 disabled={uploadStatus === "uploading"}
                 onChange={handleFileChange}
               />
 
               {uploadStatus === "uploading" && (
-                <s-text color="subdued">Uploading certificate...</s-text>
+                <s-text color="subdued">
+                  {i18n.translate("taxExemptionCard.uploadingCertificate")}
+                </s-text>
               )}
               {uploadStatus === "success" && (
                 <s-text color="success">
-                  Certificate uploaded successfully
+                  {i18n.translate(
+                    "taxExemptionCard.certificateUploadedSuccessfully",
+                  )}
                 </s-text>
               )}
               {uploadStatus === "error" && (
-                <s-text color="critical">Upload failed: {uploadError}</s-text>
+                <s-text color="critical">
+                  {i18n.translate("taxExemptionCard.certificateUploadFailed", {
+                    error: uploadError,
+                  })}
+                </s-text>
               )}
 
               <s-checkbox
                 checked={newTaxExemptionAttestation}
-                label="By uploading this document, you certify that the certificate is valid, unexpired, and covers the jurisdiction(s) of your shipping address. All certificates are subject to manual review before tax-exempt status is granted."
+                required
+                label={i18n.translate("taxExemptionCard.attestationLabel")}
                 onChange={(e) =>
                   setNewTaxExemptionAttestation(e.target.checked)
                 }
@@ -331,7 +364,7 @@ function ProfilePreferenceExtension(props) {
                 disabled={loading || uploadStatus === "uploading"}
                 onClick={handleCancel}
               >
-                {i18n.translate("preferenceCard.cancel")}
+                {i18n.translate("taxExemptionCard.cancel")}
               </s-button>
               <s-button
                 slot="primary-action"
@@ -340,7 +373,7 @@ function ProfilePreferenceExtension(props) {
                 loading={loading}
                 disabled={uploadStatus === "uploading"}
               >
-                {i18n.translate("preferenceCard.save")}
+                {i18n.translate("taxExemptionCard.save")}
               </s-button>
             </s-stack>
           </s-stack>
@@ -350,7 +383,7 @@ function ProfilePreferenceExtension(props) {
   );
 }
 
-async function getCustomerPreferences() {
+async function getTaxExemptionFields() {
   const response = await fetch(
     "shopify:customer-account/api/2026-01/graphql.json",
     {
@@ -359,7 +392,7 @@ async function getCustomerPreferences() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        query: `query preferences($namespace: String!) {
+        query: `query taxExemptionFields($namespace: String!) {
           customer {
             id
             taxExemptionType: metafield(namespace: $namespace, key: "tax_exemption_type") {
@@ -412,7 +445,7 @@ async function getCustomerPreferences() {
   };
 }
 
-async function saveCustomerPreferences(
+async function saveTaxExemptionFields(
   customerId,
   taxExemptionType,
   taxExemptionAttestation,
@@ -425,7 +458,7 @@ async function saveCustomerPreferences(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        query: `mutation savePreferences($metafields: [MetafieldsSetInput!]!) {
+        query: `mutation saveTaxExemptionFields($metafields: [MetafieldsSetInput!]!) {
           metafieldsSet(metafields: $metafields) {
             metafields {
               key
@@ -460,7 +493,10 @@ async function saveCustomerPreferences(
   );
 
   const json = await response.json();
-  console.log("Save preferences response:", JSON.stringify(json, null, 2));
+  console.log(
+    "Save tax exemption fields response:",
+    JSON.stringify(json, null, 2),
+  );
 
   if (json.errors) {
     console.error("GraphQL errors:", JSON.stringify(json.errors, null, 2));

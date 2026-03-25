@@ -1,9 +1,29 @@
 {
-  "preferenceCard": {
+  "taxExemptionCard": {
     "heading": "Tax Exemption",
+    "add": "Add",
     "edit": "Edit tax exemption type",
     "modalHeading": "Edit Tax Exemption",
     "cancel": "Cancel",
-    "save": "Save"
+    "save": "Save",
+    "noExemptionInfo": "No tax exemption documentation added",
+    "statusLabel": "Status",
+    "typeLabel": "Tax exemption type",
+    "notSet": "Not set",
+    "certificateLabel": "Tax exemption certificate",
+    "attestationLabel": "By uploading this document, you certify that the certificate is valid, unexpired, and covers the jurisdiction(s) of your shipping address. All certificates are subject to manual review before tax-exempt status is granted.",
+    "uploaded": "Uploaded",
+    "uploading": "Uploading...",
+    "certificateUploadedSuccessfully": "Certificate uploaded successfully",
+    "certificateUploadFailed": "Certificate upload failed: {uploadError}",
+    "notUploaded": "Not uploaded",
+    "expirationLabel": "Expiration date",
+    "selectType": "Select a type...",
+    "resale": "Resale",
+    "governmentMilitary": "Government/Military",
+    "manufacturingIndustrial": "Manufacturing/Industrial",
+    "other": "Other",
+    "underReview": "Under Review",
+    "approved": "Approved"
   }
 }

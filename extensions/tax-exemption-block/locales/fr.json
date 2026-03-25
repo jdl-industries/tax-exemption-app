@@ -1,3 +1,9 @@
 {
-  "earnPoints": "Vous avez gagné 1,000 points avec cette commande. Vous avez été promu au niveau Platine."
+  "preferenceCard": {
+    "heading": "Exonération fiscale",
+    "edit": "Modifier le type d'exonération fiscale",
+    "modalHeading": "Modifier l'exonération fiscale",
+    "cancel": "Annuler",
+    "save": "Enregistrer"
+  }
 }

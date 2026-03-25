@@ -1,3 +1,9 @@
 {
-  "earnPoints": "You've earned 1,000 points from this order. You've been upgraded to Platinum tier."
+  "preferenceCard": {
+    "heading": "Tax Exemption",
+    "edit": "Edit tax exemption type",
+    "modalHeading": "Edit Tax Exemption",
+    "cancel": "Cancel",
+    "save": "Save"
+  }
 }

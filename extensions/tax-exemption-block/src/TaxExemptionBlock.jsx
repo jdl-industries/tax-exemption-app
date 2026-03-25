@@ -5,7 +5,6 @@ import { useState, useRef } from "preact/hooks";
 // Configuration
 const WORKER_URL =
   "https://jdl-tax-exemption-backend.mikerrobinson236.workers.dev";
-const METAFIELD_NAMESPACE = "app--330609819649--tax_exemption";
 
 export default async () => {
   const {
@@ -147,7 +146,7 @@ function ProfilePreferenceExtension(props) {
           },
           body: JSON.stringify({
             customerId: props.customerId,
-            namespace: METAFIELD_NAMESPACE,
+            namespace: "$app",
             metafieldKey: "tax_exemption_certificate",
             resourceUrl: resourceUrl,
           }),
@@ -204,35 +203,30 @@ function ProfilePreferenceExtension(props) {
       <s-section>
         <s-stack direction="block" gap="large-200">
           <s-heading>
-            <s-stack direction="inline" gap="small-100">
+            <s-stack direction="inline" gap="large-300">
               <s-text>{i18n.translate("preferenceCard.heading")}</s-text>
-              {showExemptView && (
-                <s-link
+              {showExemptView ? (
+                <s-clickable
                   aria-label={i18n.translate("preferenceCard.edit")}
                   command="--show"
                   commandFor="profile-preference-modal"
                 >
-                  <s-icon type="edit" size="small" />
-                </s-link>
+                  <s-text tone="custom">
+                    <s-icon type="edit" size="small" />
+                  </s-text>
+                </s-clickable>
+              ) : (
+                <s-clickable
+                  command="--show"
+                  commandFor="profile-preference-modal"
+                >
+                  <s-text tone="custom">+ Add</s-text>
+                </s-clickable>
               )}
             </s-stack>
           </s-heading>
 
-          {!showExemptView ? (
-            /* Non-exempt state: show button to request exemption */
-            <s-stack direction="block" gap="small-500">
-              <s-button
-                variant="secondary"
-                disabled={loading}
-                loading={loading}
-                command="--show"
-                icon="money"
-                commandFor="profile-preference-modal"
-              >
-                Provide tax exemption documentation
-              </s-button>
-            </s-stack>
-          ) : (
+          {showExemptView ? (
             /* Exempt state: show all fields */
             <>
               <s-stack direction="block" gap="small-500">
@@ -256,6 +250,21 @@ function ProfilePreferenceExtension(props) {
               <s-stack direction="block" gap="small-500">
                 <s-text color="subdued">Expiration</s-text>
                 <s-text>{props.taxExemptionExpiration || "Not set"}</s-text>
+              </s-stack>
+            </>
+          ) : (
+            /* Empty state: show placeholder matching addresses section style */
+            <>
+              <s-stack
+                background="subdued"
+                borderRadius="base"
+                borderWidth="base"
+                padding="large-100"
+                direction="inline"
+                gap="base"
+              >
+                <s-icon type="info" />
+                <s-paragraph>No tax exemption documentation added</s-paragraph>
               </s-stack>
             </>
           )}
@@ -350,23 +359,26 @@ async function getCustomerPreferences() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        query: `query preferences {
+        query: `query preferences($namespace: String!) {
           customer {
             id
-            taxExemptionType: metafield(namespace: "${METAFIELD_NAMESPACE}", key: "tax_exemption_type") {
+            taxExemptionType: metafield(namespace: $namespace, key: "tax_exemption_type") {
               value
             }
-            taxExemptionCertificate: metafield(namespace: "${METAFIELD_NAMESPACE}", key: "tax_exemption_certificate") {
+            taxExemptionCertificate: metafield(namespace: $namespace, key: "tax_exemption_certificate") {
               value
             }
-            taxExemptionAttestation: metafield(namespace: "${METAFIELD_NAMESPACE}", key: "tax_exemption_attestation") {
+            taxExemptionAttestation: metafield(namespace: $namespace, key: "tax_exemption_attestation") {
               value
             }
-            taxExemptionExpiration: metafield(namespace: "${METAFIELD_NAMESPACE}", key: "tax_exemption_certification_expiration") {
+            taxExemptionExpiration: metafield(namespace: $namespace, key: "tax_exemption_certification_expiration") {
               value
             }
           }
         }`,
+        variables: {
+          namespace: "$app",
+        },
       }),
     },
   );
@@ -429,14 +441,14 @@ async function saveCustomerPreferences(
           metafields: [
             {
               key: "tax_exemption_type",
-              namespace: METAFIELD_NAMESPACE,
+              namespace: "$app",
               type: "single_line_text_field",
               ownerId: customerId,
               value: taxExemptionType ?? "",
             },
             {
               key: "tax_exemption_attestation",
-              namespace: METAFIELD_NAMESPACE,
+              namespace: "$app",
               type: "boolean",
               ownerId: customerId,
               value: taxExemptionAttestation ? "true" : "false",

@@ -2,7 +2,7 @@
 
 client_id = "4b8e37ee7c0518815c6003c7d33d1ace"
 name = "JDL Tax Exemption"
-application_url = "https://example.com"
+application_url = "https://tax-exemption-service.jdlindustries.workers.dev"
 embedded = true
 
 [build]
@@ -22,12 +22,16 @@ uri = "/webhooks/app/scopes_update"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "customer_read_customers, customer_write_customers, read_customers, write_customers, write_files"
+scopes = "read_products, customer_read_customers, customer_write_customers, read_customers, write_customers, write_files"
 use_protected_customer_data_level = 1
 protected_customer_data_access_reason = "To display and manage customer tax exemption metafields"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [
+  "https://tax-exemption-service.jdlindustries.workers.dev/auth/callback",
+  "https://tax-exemption-service.jdlindustries.workers.dev/auth/shopify/callback",
+  "https://tax-exemption-service.jdlindustries.workers.dev/"
+]
 
 [customer.metafields.app.tax_exemption_type]
 type = "single_line_text_field"

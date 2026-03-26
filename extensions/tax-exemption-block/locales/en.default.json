@@ -15,7 +15,7 @@
     "uploaded": "Uploaded",
     "uploading": "Uploading...",
     "certificateUploadedSuccessfully": "Certificate uploaded successfully",
-    "certificateUploadFailed": "Certificate upload failed: {uploadError}",
+    "certificateUploadFailed": "Certificate upload failed: {{error}}",
     "notUploaded": "Not uploaded",
     "expirationLabel": "Expiration date",
     "selectType": "Select a type...",

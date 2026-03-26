@@ -15,7 +15,7 @@
     "uploaded": "Téléchargé",
     "uploading": "Téléchargement...",
     "certificateUploadedSuccessfully": "Certificat téléchargé avec succès",
-    "certificateUploadFailed": "Échec du téléchargement du certificat : {uploadError}",
+    "certificateUploadFailed": "Échec du téléchargement du certificat : {error}",
     "notUploaded": "Non téléchargé",
     "expirationLabel": "Date d'expiration",
     "selectType": "Sélectionnez un type...",

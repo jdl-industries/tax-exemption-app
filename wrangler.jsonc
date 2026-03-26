@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tax-exemption-service",
+  "compatibility_date": "2025-04-04",
+  "main": "./workers/app.ts",
+  "observability": {
+    "enabled": true,
+  },
+  "upload_source_maps": true,
+  "compatibility_flags": ["nodejs_compat"],
+  // KV namespace for Shopify session storage
+  // Create with: wrangler kv:namespace create SHOPIFY_SESSIONS
+  // Then update the id below with the returned namespace ID
+  "kv_namespaces": [
+    {
+      "binding": "SHOPIFY_SESSIONS",
+      "id": "589f1144460b4947a43eff99e153724d",
+      "preview_id": "589f1144460b4947a43eff99e153724d"
+    }
+  ],
+  // Secrets (set via wrangler secret put):
+  // - SHOPIFY_API_KEY
+  // - SHOPIFY_API_SECRET
+  // - SCOPES
+  // - SHOPIFY_APP_URL
+}

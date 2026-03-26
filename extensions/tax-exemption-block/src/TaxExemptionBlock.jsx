@@ -2,9 +2,7 @@
 import { render } from "preact";
 import { useState, useRef } from "preact/hooks";
 
-// Configuration
-const WORKER_URL =
-  "https://jdl-tax-exemption-backend.mikerrobinson236.workers.dev";
+const WORKER_URL = "https://tax-exemption-service.jdlindustries.workers.dev";
 
 export default async () => {
   const {
@@ -92,7 +90,7 @@ function TaxExemptionBlock(props) {
 
       // Step 1: Get staged upload URL from worker
       const stagedUploadResponse = await fetch(
-        `${WORKER_URL}/b2b/staged-upload-url`,
+        `${WORKER_URL}/api/b2b/staged-upload-url`,
         {
           method: "POST",
           headers: {
@@ -137,7 +135,7 @@ function TaxExemptionBlock(props) {
 
       // Step 3: Save the file reference metafield via worker
       const metafieldResponse = await fetch(
-        `${WORKER_URL}/b2b/customer-metafields`,
+        `${WORKER_URL}/api/b2b/customer-metafields`,
         {
           method: "POST",
           headers: {
@@ -173,6 +171,11 @@ function TaxExemptionBlock(props) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    // Validate: must have certificate uploaded and attestation checked
+    const hasCertificate = !!taxExemptionCertificate || !!pendingCertificateUrl;
+    if (!hasCertificate || !newTaxExemptionAttestation) {
+      return;
+    }
     setLoading(true);
     const { type, attestation } = await saveTaxExemptionFields(
       props.customerId,
@@ -329,7 +332,7 @@ function TaxExemptionBlock(props) {
 
               {uploadStatus === "uploading" && (
                 <s-text color="subdued">
-                  {i18n.translate("taxExemptionCard.uploadingCertificate")}
+                  {i18n.translate("taxExemptionCard.uploading")}
                 </s-text>
               )}
               {uploadStatus === "success" && (
@@ -371,7 +374,11 @@ function TaxExemptionBlock(props) {
                 type="submit"
                 variant="primary"
                 loading={loading}
-                disabled={uploadStatus === "uploading"}
+                disabled={
+                  uploadStatus === "uploading" ||
+                  !newTaxExemptionAttestation ||
+                  (!taxExemptionCertificate && !pendingCertificateUrl)
+                }
               >
                 {i18n.translate("taxExemptionCard.save")}
               </s-button>

@@ -5,22 +5,6 @@ import {
   shopifyApp,
 } from "@shopify/shopify-app-react-router/server";
 import { KVSessionStorage } from "@shopify/shopify-app-session-storage-kv";
-import type { AppLoadContext } from "react-router";
-
-// Create KV session storage - namespace is set at runtime
-// because Cloudflare KV bindings are only available via env at request time
-const kvSessionStorage = new KVSessionStorage();
-
-/**
- * Ensure KV namespace is set from the request context.
- * Call this before any authentication operations in route handlers.
- * Safe to call multiple times - will only set if context has the binding.
- */
-export function ensureKVNamespace(context: AppLoadContext) {
-  if (context?.cloudflare?.env?.SHOPIFY_SESSIONS) {
-    kvSessionStorage.setNamespace(context.cloudflare.env.SHOPIFY_SESSIONS);
-  }
-}
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -29,7 +13,7 @@ const shopify = shopifyApp({
   scopes: process.env.SCOPES?.split(","),
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
-  sessionStorage: kvSessionStorage,
+  sessionStorage: new KVSessionStorage(),
   distribution: AppDistribution.AppStore,
   future: {
     expiringOfflineAccessTokens: true,
@@ -55,5 +39,4 @@ export const authenticate = shopify.authenticate;
 export const unauthenticated = shopify.unauthenticated;
 export const login = shopify.login;
 export const registerWebhooks = shopify.registerWebhooks;
-// Export the KV session storage instance directly so the worker entry can call setNamespace
-export const sessionStorage = kvSessionStorage;
+export const sessionStorage = shopify.sessionStorage;

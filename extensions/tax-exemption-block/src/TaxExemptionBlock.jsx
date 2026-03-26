@@ -242,6 +242,7 @@ function TaxExemptionBlock(props) {
               <s-text>{i18n.translate("taxExemptionCard.heading")}</s-text>
               {showExemptView ? (
                 <s-clickable
+                  key="edit-action"
                   aria-label={i18n.translate("taxExemptionCard.edit")}
                   command="--show"
                   commandFor="profile-preference-modal"
@@ -252,6 +253,7 @@ function TaxExemptionBlock(props) {
                 </s-clickable>
               ) : (
                 <s-clickable
+                  key="add-action"
                   command="--show"
                   commandFor="profile-preference-modal"
                 >

@@ -1,0 +1,27 @@
+api_version = "2025-10"
+[[extensions]]
+# Change the merchant-facing name of the extension in locales/en.default.json
+name = "Tax Exempt Customer Management Block"
+handle = "tax-exempt-customer-management-block"
+type = "ui_extension"
+uid = "a12ba15d-800f-9f4c-5eb5-6007d1daa751735f7095"
+
+[[extensions.targeting]]
+module = "./src/CustomerAdminBlock.jsx"
+target = "admin.customer-details.block.render"
+
+[[extensions.targeting.metafields]]
+namespace = "$app"
+key = "tax_exemption_type"
+
+[[extensions.targeting.metafields]]
+namespace = "$app"
+key = "tax_exemption_certificate"
+
+[[extensions.targeting.metafields]]
+namespace = "$app"
+key = "tax_exemption_attestation"
+
+[[extensions.targeting.metafields]]
+namespace = "$app"
+key = "tax_exemption_certification_expiration"

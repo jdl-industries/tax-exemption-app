@@ -24,6 +24,9 @@
     "manufacturingIndustrial": "Manufacturing/Industrial",
     "other": "Other",
     "underReview": "Under Review",
-    "approved": "Approved"
+    "approved": "Approved",
+    "currentFile": "Current file",
+    "addFile": "Add file",
+    "updateFile": "Update file"
   }
 }

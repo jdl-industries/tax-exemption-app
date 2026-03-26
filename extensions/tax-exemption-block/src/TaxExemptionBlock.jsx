@@ -9,6 +9,7 @@ export default async () => {
     customerId,
     taxExemptionType,
     taxExemptionCertificate,
+    certificateFilename,
     taxExemptionAttestation,
     taxExemptionExpiration,
   } = await getTaxExemptionFields();
@@ -18,6 +19,7 @@ export default async () => {
       customerId={customerId}
       taxExemptionType={taxExemptionType}
       taxExemptionCertificate={taxExemptionCertificate}
+      certificateFilename={certificateFilename}
       taxExemptionAttestation={taxExemptionAttestation}
       taxExemptionExpiration={taxExemptionExpiration}
     />,
@@ -34,6 +36,9 @@ function TaxExemptionBlock(props) {
   const [taxExemptionCertificate, setTaxExemptionCertificate] = useState(
     props.taxExemptionCertificate ?? null,
   );
+  const [certificateFilename, setCertificateFilename] = useState(
+    props.certificateFilename ?? null,
+  );
   const [taxExemptionType, setTaxExemptionType] = useState(
     props.taxExemptionType ?? "",
   );
@@ -45,9 +50,13 @@ function TaxExemptionBlock(props) {
   const [newTaxExemptionType, setNewTaxExemptionType] =
     useState(taxExemptionType);
   const [newTaxExemptionAttestation, setNewTaxExemptionAttestation] = useState(
-    taxExemptionAttestation,
+    props.taxExemptionAttestation ?? false,
   );
-  const [pendingCertificateUrl, setPendingCertificateUrl] = useState(null);
+  const [pendingFile, setPendingFile] = useState(null); // File object waiting to be uploaded on Save
+
+  // Determine if a certificate exists (either saved or pending selection)
+  const hasCertificate = !!taxExemptionCertificate || !!pendingFile;
+  const displayFilename = pendingFile?.name || certificateFilename;
 
   // Show exempt view if any field has been set
   const hasAnyFieldSet =
@@ -69,8 +78,8 @@ function TaxExemptionBlock(props) {
   };
   const status = getStatus();
 
-  // Handle file selection from drop-zone
-  const handleFileChange = async (event) => {
+  // Handle file selection from drop-zone - just store the file, don't upload yet
+  const handleFileChange = (event) => {
     const files = event.target.files || event.currentTarget.files;
     if (!files || files.length === 0) {
       console.log("No files selected");
@@ -80,116 +89,133 @@ function TaxExemptionBlock(props) {
     const file = files[0];
     console.log("File selected:", file.name, file.type, file.size);
 
-    setUploadStatus("uploading");
+    // Store the file for upload on Save
+    setPendingFile(file);
+    setUploadStatus(null);
     setUploadError(null);
+  };
 
-    try {
-      // Get session token for authentication
-      const sessionToken = await shopify.sessionToken.get();
-      console.log("Got session token");
+  // Upload file to Shopify and save metafield reference
+  const uploadCertificate = async (file) => {
+    const sessionToken = await shopify.sessionToken.get();
+    console.log("Got session token");
 
-      // Step 1: Get staged upload URL from worker
-      const stagedUploadResponse = await fetch(
-        `${WORKER_URL}/api/b2b/staged-upload-url`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${sessionToken}`,
-          },
-          body: JSON.stringify({
-            filename: file.name,
-            mimeType: file.type || "application/octet-stream",
-            fileSize: file.size,
-          }),
-        },
-      );
-
-      if (!stagedUploadResponse.ok) {
-        const errorData = await stagedUploadResponse.json();
-        throw new Error(errorData.error || "Failed to get upload URL");
-      }
-
-      const { url, resourceUrl, parameters } =
-        await stagedUploadResponse.json();
-      console.log("Got staged upload URL:", url);
-
-      // Step 2: Upload file directly to Shopify's presigned URL
-      const formData = new FormData();
-      // Add all the presigned URL parameters first
-      for (const param of parameters) {
-        formData.append(param.name, param.value);
-      }
-      // Add the file last
-      formData.append("file", file);
-
-      const uploadResponse = await fetch(url, {
+    // Step 1: Get staged upload URL from worker
+    const stagedUploadResponse = await fetch(
+      `${WORKER_URL}/api/b2b/staged-upload-url`,
+      {
         method: "POST",
-        body: formData,
-      });
-
-      if (!uploadResponse.ok) {
-        throw new Error(`File upload failed: ${uploadResponse.status}`);
-      }
-      console.log("File uploaded to Shopify");
-
-      // Step 3: Save the file reference metafield via worker
-      const metafieldResponse = await fetch(
-        `${WORKER_URL}/api/b2b/customer-metafields`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${sessionToken}`,
-          },
-          body: JSON.stringify({
-            customerId: props.customerId,
-            namespace: "$app",
-            metafieldKey: "tax_exemption_certificate",
-            resourceUrl: resourceUrl,
-          }),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionToken}`,
         },
-      );
+        body: JSON.stringify({
+          filename: file.name,
+          mimeType: file.type || "application/octet-stream",
+          fileSize: file.size,
+        }),
+      },
+    );
 
-      if (!metafieldResponse.ok) {
-        const errorData = await metafieldResponse.json();
-        throw new Error(errorData.error || "Failed to save file reference");
-      }
-
-      console.log("File reference saved to metafield");
-
-      // Update state
-      setPendingCertificateUrl(resourceUrl);
-      setTaxExemptionCertificate(resourceUrl);
-      setUploadStatus("success");
-    } catch (error) {
-      console.error("File upload error:", error);
-      setUploadError(error.message);
-      setUploadStatus("error");
+    if (!stagedUploadResponse.ok) {
+      const errorData = await stagedUploadResponse.json();
+      throw new Error(errorData.error || "Failed to get upload URL");
     }
+
+    const { url, resourceUrl, parameters } =
+      await stagedUploadResponse.json();
+    console.log("Got staged upload URL:", url);
+
+    // Step 2: Upload file directly to Shopify's presigned URL
+    const formData = new FormData();
+    for (const param of parameters) {
+      formData.append(param.name, param.value);
+    }
+    formData.append("file", file);
+
+    const uploadResponse = await fetch(url, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!uploadResponse.ok) {
+      throw new Error(`File upload failed: ${uploadResponse.status}`);
+    }
+    console.log("File uploaded to Shopify");
+
+    // Step 3: Save the file reference metafield via worker
+    const metafieldResponse = await fetch(
+      `${WORKER_URL}/api/b2b/customer-metafields`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionToken}`,
+        },
+        body: JSON.stringify({
+          customerId: props.customerId,
+          namespace: "$app",
+          metafieldKey: "tax_exemption_certificate",
+          resourceUrl: resourceUrl,
+        }),
+      },
+    );
+
+    if (!metafieldResponse.ok) {
+      const errorData = await metafieldResponse.json();
+      throw new Error(errorData.error || "Failed to save file reference");
+    }
+
+    console.log("File reference saved to metafield");
+    return file.name;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    // Validate: must have certificate uploaded and attestation checked
-    const hasCertificate = !!taxExemptionCertificate || !!pendingCertificateUrl;
+    // Validate: must have certificate (existing or pending) and attestation checked
     if (!hasCertificate || !newTaxExemptionAttestation) {
       return;
     }
+
     setLoading(true);
-    const { type, attestation } = await saveTaxExemptionFields(
-      props.customerId,
-      newTaxExemptionType,
-      newTaxExemptionAttestation,
-    );
-    // Update display state
-    setTaxExemptionType(type);
-    setTaxExemptionAttestation(attestation);
-    // Sync form state with saved values
-    setNewTaxExemptionType(type);
-    setNewTaxExemptionAttestation(attestation);
-    setLoading(false);
-    modalRef.current?.hideOverlay?.() || modalRef.current?.hide?.();
+    setUploadStatus(null);
+    setUploadError(null);
+
+    try {
+      // Upload pending file if there is one
+      let uploadedFilename = certificateFilename;
+      if (pendingFile) {
+        setUploadStatus("uploading");
+        uploadedFilename = await uploadCertificate(pendingFile);
+        setTaxExemptionCertificate("uploaded"); // Mark as having a certificate
+        setCertificateFilename(uploadedFilename);
+        setUploadStatus("success");
+      }
+
+      // Save type and attestation metafields
+      const { type, attestation } = await saveTaxExemptionFields(
+        props.customerId,
+        newTaxExemptionType,
+        newTaxExemptionAttestation,
+      );
+
+      // Update display state
+      setTaxExemptionType(type);
+      setTaxExemptionAttestation(attestation);
+      // Sync form state with saved values
+      setNewTaxExemptionType(type);
+      setNewTaxExemptionAttestation(attestation);
+      // Clear pending file
+      setPendingFile(null);
+
+      setLoading(false);
+      modalRef.current?.hideOverlay?.() || modalRef.current?.hide?.();
+    } catch (error) {
+      console.error("Save error:", error);
+      setUploadError(error.message);
+      setUploadStatus("error");
+      setLoading(false);
+    }
   };
 
   const handleCancel = () => {
@@ -198,6 +224,7 @@ function TaxExemptionBlock(props) {
     setNewTaxExemptionAttestation(taxExemptionAttestation);
     setUploadStatus(null);
     setUploadError(null);
+    setPendingFile(null);
     modalRef.current?.hideOverlay?.() || modalRef.current?.hide?.();
   };
 
@@ -255,7 +282,7 @@ function TaxExemptionBlock(props) {
                 </s-text>
                 <s-text>
                   {taxExemptionCertificate
-                    ? i18n.translate("taxExemptionCard.uploaded")
+                    ? (displayFilename || i18n.translate("taxExemptionCard.uploaded"))
                     : i18n.translate("taxExemptionCard.notUploaded")}
                 </s-text>
               </s-stack>
@@ -320,13 +347,25 @@ function TaxExemptionBlock(props) {
                 </s-option>
               </s-select>
 
+              <s-stack direction="block" gap="small">
+                <s-text color="subdued">
+                  {i18n.translate("taxExemptionCard.certificateLabel")}
+                </s-text>
+                {displayFilename && (
+                  <s-text>{displayFilename}</s-text>
+                )}
+              </s-stack>
+
               <s-drop-zone
-                label={i18n.translate("taxExemptionCard.certificateLabel")}
+                label={hasCertificate
+                  ? i18n.translate("taxExemptionCard.updateFile")
+                  : i18n.translate("taxExemptionCard.addFile")
+                }
                 accessibilityLabel={i18n.translate(
                   "taxExemptionCard.certificateLabel",
                 )}
                 accept=".pdf,.jpg,.jpeg,.png,.gif"
-                disabled={uploadStatus === "uploading"}
+                disabled={loading}
                 onChange={handleFileChange}
               />
 
@@ -364,7 +403,7 @@ function TaxExemptionBlock(props) {
               <s-button
                 slot="secondary-actions"
                 variant="secondary"
-                disabled={loading || uploadStatus === "uploading"}
+                disabled={loading}
                 onClick={handleCancel}
               >
                 {i18n.translate("taxExemptionCard.cancel")}
@@ -375,9 +414,9 @@ function TaxExemptionBlock(props) {
                 variant="primary"
                 loading={loading}
                 disabled={
-                  uploadStatus === "uploading" ||
+                  loading ||
                   !newTaxExemptionAttestation ||
-                  (!taxExemptionCertificate && !pendingCertificateUrl)
+                  !hasCertificate
                 }
               >
                 {i18n.translate("taxExemptionCard.save")}
@@ -407,6 +446,13 @@ async function getTaxExemptionFields() {
             }
             taxExemptionCertificate: metafield(namespace: $namespace, key: "tax_exemption_certificate") {
               value
+              reference {
+                ... on GenericFile {
+                  url
+                  originalFileSize
+                  mimeType
+                }
+              }
             }
             taxExemptionAttestation: metafield(namespace: $namespace, key: "tax_exemption_attestation") {
               value
@@ -437,15 +483,30 @@ async function getTaxExemptionFields() {
       customerId: null,
       taxExemptionType: null,
       taxExemptionCertificate: null,
+      certificateFilename: null,
       taxExemptionAttestation: false,
       taxExemptionExpiration: null,
     };
+  }
+
+  // Extract filename from file URL if available
+  let certificateFilename = null;
+  const fileRef = data.customer.taxExemptionCertificate?.reference;
+  if (fileRef?.url) {
+    try {
+      const url = new URL(fileRef.url);
+      const pathParts = url.pathname.split("/");
+      certificateFilename = decodeURIComponent(pathParts[pathParts.length - 1]);
+    } catch (e) {
+      console.warn("Could not extract filename from URL:", e);
+    }
   }
 
   return {
     customerId: data.customer.id,
     taxExemptionType: data.customer.taxExemptionType?.value,
     taxExemptionCertificate: data.customer.taxExemptionCertificate?.value,
+    certificateFilename,
     taxExemptionAttestation:
       data.customer.taxExemptionAttestation?.value === "true",
     taxExemptionExpiration: data.customer.taxExemptionExpiration?.value,

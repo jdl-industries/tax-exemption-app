@@ -10,6 +10,7 @@ export default async () => {
     taxExemptionType,
     taxExemptionCertificate,
     certificateFilename,
+    certificateUrl,
     taxExemptionAttestation,
     taxExemptionExpiration,
   } = await getTaxExemptionFields();
@@ -20,6 +21,7 @@ export default async () => {
       taxExemptionType={taxExemptionType}
       taxExemptionCertificate={taxExemptionCertificate}
       certificateFilename={certificateFilename}
+      certificateUrl={certificateUrl}
       taxExemptionAttestation={taxExemptionAttestation}
       taxExemptionExpiration={taxExemptionExpiration}
     />,
@@ -38,6 +40,9 @@ function TaxExemptionBlock(props) {
   );
   const [certificateFilename, setCertificateFilename] = useState(
     props.certificateFilename ?? null,
+  );
+  const [certificateUrl, setCertificateUrl] = useState(
+    props.certificateUrl ?? null,
   );
   const [taxExemptionType, setTaxExemptionType] = useState(
     props.taxExemptionType ?? "",
@@ -280,11 +285,19 @@ function TaxExemptionBlock(props) {
                 <s-text color="subdued">
                   {i18n.translate("taxExemptionCard.certificateLabel")}
                 </s-text>
-                <s-text>
-                  {taxExemptionCertificate
-                    ? (displayFilename || i18n.translate("taxExemptionCard.uploaded"))
-                    : i18n.translate("taxExemptionCard.notUploaded")}
-                </s-text>
+                {taxExemptionCertificate ? (
+                  certificateUrl ? (
+                    <s-link href={certificateUrl} target="_blank">
+                      {displayFilename || i18n.translate("taxExemptionCard.uploaded")}
+                    </s-link>
+                  ) : (
+                    <s-text>
+                      {displayFilename || i18n.translate("taxExemptionCard.uploaded")}
+                    </s-text>
+                  )
+                ) : (
+                  <s-text>{i18n.translate("taxExemptionCard.notUploaded")}</s-text>
+                )}
               </s-stack>
               <s-stack direction="block">
                 <s-text color="subdued">
@@ -484,15 +497,18 @@ async function getTaxExemptionFields() {
       taxExemptionType: null,
       taxExemptionCertificate: null,
       certificateFilename: null,
+      certificateUrl: null,
       taxExemptionAttestation: false,
       taxExemptionExpiration: null,
     };
   }
 
-  // Extract filename from file URL if available
+  // Extract filename and URL from file reference if available
   let certificateFilename = null;
+  let certificateUrl = null;
   const fileRef = data.customer.taxExemptionCertificate?.reference;
   if (fileRef?.url) {
+    certificateUrl = fileRef.url;
     try {
       const url = new URL(fileRef.url);
       const pathParts = url.pathname.split("/");
@@ -507,6 +523,7 @@ async function getTaxExemptionFields() {
     taxExemptionType: data.customer.taxExemptionType?.value,
     taxExemptionCertificate: data.customer.taxExemptionCertificate?.value,
     certificateFilename,
+    certificateUrl,
     taxExemptionAttestation:
       data.customer.taxExemptionAttestation?.value === "true",
     taxExemptionExpiration: data.customer.taxExemptionExpiration?.value,

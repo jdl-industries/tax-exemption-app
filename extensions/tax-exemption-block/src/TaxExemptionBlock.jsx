@@ -1,37 +1,143 @@
 // @ts-nocheck
 import { render } from "preact";
-import { useState, useRef } from "preact/hooks";
+import { useState, useRef, useEffect } from "preact/hooks";
 
 const WORKER_URL = "https://tax-exemption-service.jdlindustries.workers.dev";
 
+/**
+ * Shopify's built-in B2B roles are "Location admin" and "Ordering only". Only a
+ * Location admin may edit a location's tax data. The role's GID differs per
+ * shop, so the name is the only stable identifier available here.
+ *
+ * This gate controls the edit affordance only -- the worker independently
+ * re-verifies the role before writing anything.
+ */
+const LOCATION_ADMIN_ROLE_NAME = "location admin";
+
 export default async () => {
-  const {
-    customerId,
-    taxExemptionType,
-    taxExemptionCertificate,
-    certificateFilename,
-    certificateUrl,
-    taxExemptionAttestation,
-    taxExemptionExpiration,
-  } = await getTaxExemptionFields();
+  const { customer, locations } = await getTaxExemptionData();
 
   render(
-    <TaxExemptionBlock
-      customerId={customerId}
-      taxExemptionType={taxExemptionType}
-      taxExemptionCertificate={taxExemptionCertificate}
-      certificateFilename={certificateFilename}
-      certificateUrl={certificateUrl}
-      taxExemptionAttestation={taxExemptionAttestation}
-      taxExemptionExpiration={taxExemptionExpiration}
-    />,
+    <TaxExemptionApp customer={customer} locations={locations} />,
     document.body,
   );
 };
 
-function TaxExemptionBlock(props) {
+/**
+ * Track the company location currently chosen in the customer account location
+ * switcher.
+ *
+ * Shopify exposes it as a subscribable on `authenticatedAccount`, carrying only
+ * `{ company: { id }, location: { id } }` -- the location's name, Tax ID, roles
+ * and metafields still come from the Customer Account API query. Subscribing
+ * keeps the card in sync when the buyer changes the selection.
+ */
+function useSelectedLocationId() {
+  const purchasingCompany = shopify.authenticatedAccount?.purchasingCompany;
+
+  const [selectedLocationId, setSelectedLocationId] = useState(
+    () => purchasingCompany?.value?.location?.id ?? null,
+  );
+
+  useEffect(() => {
+    if (typeof purchasingCompany?.subscribe !== "function") {
+      return undefined;
+    }
+    // subscribe() returns its own unsubscribe function.
+    return purchasingCompany.subscribe((value) => {
+      setSelectedLocationId(value?.location?.id ?? null);
+    });
+  }, [purchasingCompany]);
+
+  return selectedLocationId;
+}
+
+/**
+ * Reduce a company location identifier to a comparable key.
+ *
+ * `authenticatedAccount.purchasingCompany` reports bare numeric IDs at runtime
+ * (e.g. "3381100601") while the Customer Account API returns full GIDs
+ * (e.g. "gid://shopify/CompanyLocation/3381100601"), so the two can't be
+ * compared directly. Shopify's own typings document the former as a GID, so
+ * this normalizes either shape and keeps working if that's ever corrected.
+ */
+function locationIdKey(id) {
+  if (!id) {
+    return null;
+  }
+  const asString = String(id);
+  const trailingNumericId = asString.match(/(\d+)$/);
+  return trailingNumericId ? trailingNumericId[1] : asString;
+}
+
+/**
+ * B2B contacts maintain exemption documentation on their company location(s)
+ * instead of on their personal customer record, so the customer card is shown
+ * only to customers with no company locations.
+ */
+function TaxExemptionApp({ customer, locations }) {
+  const selectedLocationId = useSelectedLocationId();
+
+  if (locations.length > 0) {
+    const selectedKey = locationIdKey(selectedLocationId);
+    const selectedLocation = selectedKey
+      ? locations.find((location) => locationIdKey(location.id) === selectedKey)
+      : undefined;
+
+    // Show only the location the buyer currently has selected. If that
+    // selection can't be resolved -- no location set, or one this contact isn't
+    // assigned to -- fall back to every location they hold rather than
+    // rendering an empty block.
+    const visibleLocations = selectedLocation ? [selectedLocation] : locations;
+
+    return (
+      <>
+        {visibleLocations.map((location) => (
+          <TaxExemptionCard
+            key={location.id}
+            ownerId={location.id}
+            ownerKind="location"
+            locationName={location.name}
+            canEdit={location.canEdit}
+            taxIdentifier={location.taxIdentifier}
+            taxExemptionType={location.taxExemptionType}
+            taxExemptionCertificate={location.taxExemptionCertificate}
+            certificateFilename={location.certificateFilename}
+            certificateUrl={location.certificateUrl}
+            taxExemptionAttestation={location.taxExemptionAttestation}
+            taxExemptionExpiration={location.taxExemptionExpiration}
+          />
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <TaxExemptionCard
+      ownerId={customer.customerId}
+      ownerKind="customer"
+      canEdit
+      taxExemptionType={customer.taxExemptionType}
+      taxExemptionCertificate={customer.taxExemptionCertificate}
+      certificateFilename={customer.certificateFilename}
+      certificateUrl={customer.certificateUrl}
+      taxExemptionAttestation={customer.taxExemptionAttestation}
+      taxExemptionExpiration={customer.taxExemptionExpiration}
+    />
+  );
+}
+
+function TaxExemptionCard(props) {
   const { i18n } = shopify;
   const modalRef = useRef();
+  const isLocation = props.ownerKind === "location";
+
+  // Each card renders its own modal, so the id has to be unique per owner.
+  const modalId = `tax-exemption-modal-${String(props.ownerId).replace(
+    /[^a-zA-Z0-9]/g,
+    "-",
+  )}`;
+
   const [loading, setLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState(null); // null | 'uploading' | 'success' | 'error'
   const [uploadError, setUploadError] = useState(null);
@@ -41,15 +147,17 @@ function TaxExemptionBlock(props) {
   const [certificateFilename, setCertificateFilename] = useState(
     props.certificateFilename ?? null,
   );
-  const [certificateUrl, setCertificateUrl] = useState(
-    props.certificateUrl ?? null,
-  );
+  // Note: the staged upload flow doesn't return the new file's CDN URL, so
+  // after replacing a certificate this link still points at the previous file
+  // until the page is reloaded.
+  const [certificateUrl] = useState(props.certificateUrl ?? null);
   const [taxExemptionType, setTaxExemptionType] = useState(
     props.taxExemptionType ?? "",
   );
   const [taxExemptionAttestation, setTaxExemptionAttestation] = useState(
     props.taxExemptionAttestation ?? false,
   );
+  const [taxIdentifier, setTaxIdentifier] = useState(props.taxIdentifier ?? "");
 
   // Form state for modal
   const [newTaxExemptionType, setNewTaxExemptionType] =
@@ -57,13 +165,18 @@ function TaxExemptionBlock(props) {
   const [newTaxExemptionAttestation, setNewTaxExemptionAttestation] = useState(
     props.taxExemptionAttestation ?? false,
   );
+  const [newTaxIdentifier, setNewTaxIdentifier] = useState(
+    props.taxIdentifier ?? "",
+  );
   const [pendingFile, setPendingFile] = useState(null); // File object waiting to be uploaded on Save
 
   // Determine if a certificate exists (either saved or pending selection)
   const hasCertificate = !!taxExemptionCertificate || !!pendingFile;
   const displayFilename = pendingFile?.name || certificateFilename;
 
-  // Show exempt view if any field has been set
+  // Show exempt view if any field has been set. The Tax ID is deliberately not
+  // part of this: Shopify already surfaces it natively on the location page, so
+  // it's edit-only here and shouldn't make an otherwise-empty card look filled.
   const hasAnyFieldSet =
     !!taxExemptionType ||
     !!taxExemptionCertificate ||
@@ -74,14 +187,26 @@ function TaxExemptionBlock(props) {
   // Determine status: Approved if expiration date is set (staff reviewed), otherwise Under Review
   const getStatus = () => {
     if (props.taxExemptionExpiration) {
-      return "Approved";
+      return {
+        label: i18n.translate("taxExemptionCard.approved"),
+        tone: "success",
+      };
     }
     if (hasAnyFieldSet) {
-      return "Under Review";
+      // "info" rather than "warning": nothing is wrong, staff simply haven't
+      // reviewed the submission yet.
+      return {
+        label: i18n.translate("taxExemptionCard.underReview"),
+        tone: "info",
+      };
     }
     return null;
   };
   const status = getStatus();
+
+  const heading = isLocation
+    ? i18n.translate("taxExemptionCard.locationHeading")
+    : i18n.translate("taxExemptionCard.heading");
 
   // Handle file selection from drop-zone - just store the file, don't upload yet
   const handleFileChange = (event) => {
@@ -100,7 +225,7 @@ function TaxExemptionBlock(props) {
     setUploadError(null);
   };
 
-  // Upload file to Shopify and save metafield reference
+  // Upload file to Shopify and save metafield reference against the owner
   const uploadCertificate = async (file) => {
     const sessionToken = await shopify.sessionToken.get();
     console.log("Got session token");
@@ -127,8 +252,7 @@ function TaxExemptionBlock(props) {
       throw new Error(errorData.error || "Failed to get upload URL");
     }
 
-    const { url, resourceUrl, parameters } =
-      await stagedUploadResponse.json();
+    const { url, resourceUrl, parameters } = await stagedUploadResponse.json();
     console.log("Got staged upload URL:", url);
 
     // Step 2: Upload file directly to Shopify's presigned URL
@@ -148,7 +272,9 @@ function TaxExemptionBlock(props) {
     }
     console.log("File uploaded to Shopify");
 
-    // Step 3: Save the file reference metafield via worker
+    // Step 3: Save the file reference metafield via worker. The worker turns the
+    // staged resource URL into a File GID, which a file_reference metafield
+    // requires, and re-checks that we may write to this owner.
     const metafieldResponse = await fetch(
       `${WORKER_URL}/api/b2b/customer-metafields`,
       {
@@ -158,7 +284,7 @@ function TaxExemptionBlock(props) {
           Authorization: `Bearer ${sessionToken}`,
         },
         body: JSON.stringify({
-          customerId: props.customerId,
+          ownerId: props.ownerId,
           namespace: "$app",
           metafieldKey: "tax_exemption_certificate",
           resourceUrl: resourceUrl,
@@ -175,10 +301,19 @@ function TaxExemptionBlock(props) {
     return file.name;
   };
 
+  // The Tax ID is independent of the exemption paperwork: a location admin may
+  // record it without ever uploading a certificate.
+  const taxIdChanged = isLocation && newTaxIdentifier !== taxIdentifier;
+  // An exemption submission is only valid with both a certificate and an
+  // attestation, exactly as before.
+  const exemptionReady = hasCertificate && newTaxExemptionAttestation;
+  // A Tax ID-only save is allowed, but never while a chosen file is waiting --
+  // otherwise the certificate would upload without its attestation.
+  const canSubmit = exemptionReady || (taxIdChanged && !pendingFile);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    // Validate: must have certificate (existing or pending) and attestation checked
-    if (!hasCertificate || !newTaxExemptionAttestation) {
+    if (!canSubmit) {
       return;
     }
 
@@ -197,19 +332,34 @@ function TaxExemptionBlock(props) {
         setUploadStatus("success");
       }
 
-      // Save type and attestation metafields
-      const { type, attestation } = await saveTaxExemptionFields(
-        props.customerId,
-        newTaxExemptionType,
-        newTaxExemptionAttestation,
-      );
+      // The Tax ID is a built-in field on the location, not a metafield, so it
+      // is saved separately through the worker's Admin API route.
+      if (taxIdChanged) {
+        const savedTaxIdentifier = await saveLocationTaxIdentifier(
+          props.ownerId,
+          newTaxIdentifier,
+        );
+        setTaxIdentifier(savedTaxIdentifier);
+        setNewTaxIdentifier(savedTaxIdentifier);
+      }
 
-      // Update display state
-      setTaxExemptionType(type);
-      setTaxExemptionAttestation(attestation);
-      // Sync form state with saved values
-      setNewTaxExemptionType(type);
-      setNewTaxExemptionAttestation(attestation);
+      // Only write the exemption metafields when the paperwork is complete, so
+      // a Tax ID-only edit doesn't blank out an existing type/attestation.
+      if (exemptionReady) {
+        const { type, attestation } = await saveTaxExemptionFields(
+          props.ownerId,
+          newTaxExemptionType,
+          newTaxExemptionAttestation,
+        );
+
+        // Update display state
+        setTaxExemptionType(type);
+        setTaxExemptionAttestation(attestation);
+        // Sync form state with saved values
+        setNewTaxExemptionType(type);
+        setNewTaxExemptionAttestation(attestation);
+      }
+
       // Clear pending file
       setPendingFile(null);
 
@@ -227,6 +377,7 @@ function TaxExemptionBlock(props) {
     // Reset form state and close modal
     setNewTaxExemptionType(taxExemptionType);
     setNewTaxExemptionAttestation(taxExemptionAttestation);
+    setNewTaxIdentifier(taxIdentifier);
     setUploadStatus(null);
     setUploadError(null);
     setPendingFile(null);
@@ -235,216 +386,344 @@ function TaxExemptionBlock(props) {
 
   return (
     <>
-      <s-section>
-        <s-stack direction="block" gap="large-200">
-          <s-heading>
-            <s-stack direction="inline" gap="large-300">
-              <s-text>{i18n.translate("taxExemptionCard.heading")}</s-text>
-              {showExemptView ? (
-                <s-clickable
-                  key="edit-action"
-                  aria-label={i18n.translate("taxExemptionCard.edit")}
-                  command="--show"
-                  commandFor="profile-preference-modal"
-                >
-                  <s-text tone="custom">
-                    <s-icon type="edit" size="small" />
-                  </s-text>
-                </s-clickable>
-              ) : (
-                <s-clickable
-                  key="add-action"
-                  command="--show"
-                  commandFor="profile-preference-modal"
-                >
-                  <s-text tone="custom">
-                    + {i18n.translate("taxExemptionCard.add")}
-                  </s-text>
-                </s-clickable>
-              )}
-            </s-stack>
-          </s-heading>
-
-          {showExemptView ? (
-            /* Exempt state: show all fields */
-            <>
-              <s-stack direction="block">
-                <s-text color="subdued">
-                  {i18n.translate("taxExemptionCard.statusLabel")}
-                </s-text>
-                <s-text>{status}</s-text>
-              </s-stack>
-              <s-stack direction="block">
-                <s-text color="subdued">
-                  {i18n.translate("taxExemptionCard.typeLabel")}
-                </s-text>
-                <s-text>
-                  {taxExemptionType ||
-                    i18n.translate("taxExemptionCard.notSet")}
-                </s-text>
-              </s-stack>
-              <s-stack direction="block">
-                <s-text color="subdued">
-                  {i18n.translate("taxExemptionCard.certificateLabel")}
-                </s-text>
-                {taxExemptionCertificate ? (
-                  certificateUrl ? (
-                    <s-link href={certificateUrl} target="_blank">
-                      {displayFilename || i18n.translate("taxExemptionCard.uploaded")}
-                    </s-link>
-                  ) : (
-                    <s-text>
-                      {displayFilename || i18n.translate("taxExemptionCard.uploaded")}
-                    </s-text>
-                  )
-                ) : (
-                  <s-text>{i18n.translate("taxExemptionCard.notUploaded")}</s-text>
-                )}
-              </s-stack>
-              <s-stack direction="block">
-                <s-text color="subdued">
-                  {i18n.translate("taxExemptionCard.expirationLabel")}
-                </s-text>
-                <s-text>
-                  {props.taxExemptionExpiration ||
-                    i18n.translate("taxExemptionCard.notSet")}
-                </s-text>
-              </s-stack>
-            </>
-          ) : (
-            /* Empty state: show placeholder matching addresses section style */
-            <>
-              <s-stack
-                background="subdued"
-                borderRadius="base"
-                borderWidth="base"
-                padding="large-100"
-                direction="inline"
-                gap="base"
-              >
-                <s-icon type="info" />
-                <s-paragraph>
-                  {i18n.translate("taxExemptionCard.noExemptionInfo")}
-                </s-paragraph>
-              </s-stack>
-            </>
+      {/*
+        Shopify's profile sections (shipping address, billing address, payment
+        methods) render the heading -- and its action button -- on a row *above*
+        the card, not inside it. `s-section` draws the card with the heading
+        within it, so this composes the native shape by hand instead: a heading
+        row, then a separate bordered card below.
+      */}
+      <s-stack direction="block" gap="large">
+        <s-stack
+          direction="inline"
+          alignItems="center"
+          justifyContent="space-between"
+        >
+          <s-heading>{heading}</s-heading>
+          {/*
+            s-clickable rather than s-button: ClickableProps extends BoxProps,
+            so padding/border/radius are all controllable here, and it applies
+            no tone of its own -- which is what removes the accent-blue label
+            that s-button's `tone="auto"` default produces. s-button exposes no
+            size prop, so it can't be made to match the built-in sections.
+            The label colour comes from the nested s-text.
+          */}
+          {props.canEdit && (
+            <s-clickable
+              command="--show"
+              commandFor={modalId}
+              accessibilityLabel={i18n.translate("taxExemptionCard.edit")}
+              background="base"
+              borderWidth="base"
+              borderRadius="base"
+              paddingBlock="small-100"
+              paddingInline="small"
+            >
+              <s-text type="strong">
+                {showExemptView
+                  ? i18n.translate("taxExemptionCard.editAction")
+                  : i18n.translate("taxExemptionCard.add")}
+              </s-text>
+            </s-clickable>
           )}
         </s-stack>
-      </s-section>
 
-      <s-modal
-        id="profile-preference-modal"
-        ref={modalRef}
-        heading={i18n.translate("taxExemptionCard.modalHeading")}
-      >
-        <s-form onSubmit={handleSubmit}>
-          <s-stack direction="block" gap="large">
-            <s-stack direction="block" gap="base">
-              <s-select
-                label={i18n.translate("taxExemptionCard.typeLabel")}
-                value={newTaxExemptionType}
-                onChange={(e) => setNewTaxExemptionType(e.target.value)}
-              >
-                <s-option value="">
-                  {i18n.translate("taxExemptionCard.selectType")}
-                </s-option>
-                <s-option value="Resale">
-                  {i18n.translate("taxExemptionCard.resale")}
-                </s-option>
-                <s-option value="Government/Military">
-                  {i18n.translate("taxExemptionCard.governmentMilitary")}
-                </s-option>
-                <s-option value="Manufacturing/Industrial">
-                  {i18n.translate("taxExemptionCard.manufacturingIndustrial")}
-                </s-option>
-                <s-option value="Other">
-                  {i18n.translate("taxExemptionCard.other")}
-                </s-option>
-              </s-select>
+        {/*
+          s-section supplies the native card chrome -- background, radius,
+          padding and the drop shadow. There is no shadow design token exposed
+          on s-box/s-stack, so a hand-built box can't reproduce it. Its `heading`
+          prop is deliberately left unset: it renders the title inside the card,
+          whereas the native sections put it on the row above.
+        */}
+        <s-section>
+          <s-stack direction="block" gap="large-200">
+            {showExemptView ? (
+              /* Exempt state: show all fields */
+              <>
+                {/* alignItems start so the badge hugs its text instead of
+                  stretching to the full card width. */}
+                <s-stack direction="block" alignItems="start" gap="small-100">
+                  <s-text color="subdued">
+                    {i18n.translate("taxExemptionCard.statusLabel")}
+                  </s-text>
+                  {status && (
+                    <s-badge tone={status.tone}>{status.label}</s-badge>
+                  )}
+                </s-stack>
+                <s-stack direction="block">
+                  <s-text color="subdued">
+                    {i18n.translate("taxExemptionCard.typeLabel")}
+                  </s-text>
+                  <s-text>
+                    {taxExemptionType ||
+                      i18n.translate("taxExemptionCard.notSet")}
+                  </s-text>
+                </s-stack>
+                <s-stack direction="block">
+                  <s-text color="subdued">
+                    {i18n.translate("taxExemptionCard.certificateLabel")}
+                  </s-text>
+                  {taxExemptionCertificate ? (
+                    certificateUrl ? (
+                      <s-link href={certificateUrl} target="_blank">
+                        {displayFilename ||
+                          i18n.translate("taxExemptionCard.uploaded")}
+                      </s-link>
+                    ) : (
+                      <s-text>
+                        {displayFilename ||
+                          i18n.translate("taxExemptionCard.uploaded")}
+                      </s-text>
+                    )
+                  ) : (
+                    <s-text>
+                      {i18n.translate("taxExemptionCard.notUploaded")}
+                    </s-text>
+                  )}
+                </s-stack>
+                <s-stack direction="block">
+                  <s-text color="subdued">
+                    {i18n.translate("taxExemptionCard.expirationLabel")}
+                  </s-text>
+                  <s-text>
+                    {props.taxExemptionExpiration ||
+                      i18n.translate("taxExemptionCard.notSet")}
+                  </s-text>
+                </s-stack>
+              </>
+            ) : (
+              /* Empty state: show placeholder matching addresses section style */
+              <>
+                <s-stack
+                  background="subdued"
+                  borderRadius="base"
+                  borderWidth="base"
+                  padding="large-100"
+                  direction="inline"
+                  gap="base"
+                >
+                  <s-icon type="info" />
+                  <s-paragraph>
+                    {i18n.translate("taxExemptionCard.noExemptionInfo")}
+                  </s-paragraph>
+                </s-stack>
+              </>
+            )}
+          </s-stack>
+        </s-section>
+      </s-stack>
 
-              <s-stack direction="block" gap="small">
-                <s-text color="subdued">
-                  {i18n.translate("taxExemptionCard.certificateLabel")}
-                </s-text>
-                {displayFilename && (
-                  <s-text>{displayFilename}</s-text>
+      {props.canEdit && (
+        <s-modal
+          id={modalId}
+          ref={modalRef}
+          heading={i18n.translate("taxExemptionCard.modalHeading")}
+        >
+          <s-form onSubmit={handleSubmit}>
+            <s-stack direction="block" gap="large">
+              <s-stack direction="block" gap="base">
+                {isLocation && (
+                  <s-text-field
+                    label={i18n.translate("taxExemptionCard.taxIdLabel")}
+                    value={newTaxIdentifier}
+                    disabled={loading}
+                    onChange={(e) => setNewTaxIdentifier(e.currentTarget.value)}
+                  />
                 )}
+
+                <s-select
+                  label={i18n.translate("taxExemptionCard.typeLabel")}
+                  value={newTaxExemptionType}
+                  onChange={(e) => setNewTaxExemptionType(e.target.value)}
+                >
+                  <s-option value="">
+                    {i18n.translate("taxExemptionCard.selectType")}
+                  </s-option>
+                  <s-option value="Resale">
+                    {i18n.translate("taxExemptionCard.resale")}
+                  </s-option>
+                  <s-option value="Government/Military">
+                    {i18n.translate("taxExemptionCard.governmentMilitary")}
+                  </s-option>
+                  <s-option value="Manufacturing/Industrial">
+                    {i18n.translate("taxExemptionCard.manufacturingIndustrial")}
+                  </s-option>
+                  <s-option value="Other">
+                    {i18n.translate("taxExemptionCard.other")}
+                  </s-option>
+                </s-select>
+
+                {/*
+                  s-drop-zone doesn't surface the chosen file itself, so the
+                  filename is rendered here. Give it a bordered row and a badge
+                  when the file is newly picked -- as plain text under a label it
+                  read as static copy and the selection went unnoticed.
+                */}
+                <s-stack direction="block" gap="small">
+                  <s-text color="subdued">
+                    {i18n.translate("taxExemptionCard.certificateLabel")}
+                  </s-text>
+                  {displayFilename && (
+                    <s-stack
+                      direction="inline"
+                      gap="base"
+                      alignItems="center"
+                      background="subdued"
+                      borderWidth="base"
+                      borderRadius="base"
+                      padding="base"
+                    >
+                      <s-text>{displayFilename}</s-text>
+                      {pendingFile && (
+                        <s-badge tone="info">
+                          {i18n.translate("taxExemptionCard.fileSelected")}
+                        </s-badge>
+                      )}
+                    </s-stack>
+                  )}
+                </s-stack>
+
+                <s-drop-zone
+                  label={
+                    hasCertificate
+                      ? i18n.translate("taxExemptionCard.updateFile")
+                      : i18n.translate("taxExemptionCard.addFile")
+                  }
+                  accessibilityLabel={i18n.translate(
+                    "taxExemptionCard.certificateLabel",
+                  )}
+                  accept=".pdf,.jpg,.jpeg,.png,.gif"
+                  disabled={loading}
+                  onChange={handleFileChange}
+                />
+
+                {uploadStatus === "uploading" && (
+                  <s-text color="subdued">
+                    {i18n.translate("taxExemptionCard.uploading")}
+                  </s-text>
+                )}
+                {uploadStatus === "success" && (
+                  <s-text color="success">
+                    {i18n.translate(
+                      "taxExemptionCard.certificateUploadedSuccessfully",
+                    )}
+                  </s-text>
+                )}
+                {uploadStatus === "error" && (
+                  <s-text color="critical">
+                    {i18n.translate(
+                      "taxExemptionCard.certificateUploadFailed",
+                      {
+                        error: uploadError,
+                      },
+                    )}
+                  </s-text>
+                )}
+
+                <s-checkbox
+                  checked={newTaxExemptionAttestation}
+                  required={hasCertificate}
+                  label={i18n.translate("taxExemptionCard.attestationLabel")}
+                  onChange={(e) =>
+                    setNewTaxExemptionAttestation(e.target.checked)
+                  }
+                />
               </s-stack>
 
-              <s-drop-zone
-                label={hasCertificate
-                  ? i18n.translate("taxExemptionCard.updateFile")
-                  : i18n.translate("taxExemptionCard.addFile")
-                }
-                accessibilityLabel={i18n.translate(
-                  "taxExemptionCard.certificateLabel",
-                )}
-                accept=".pdf,.jpg,.jpeg,.png,.gif"
-                disabled={loading}
-                onChange={handleFileChange}
-              />
-
-              {uploadStatus === "uploading" && (
-                <s-text color="subdued">
-                  {i18n.translate("taxExemptionCard.uploading")}
-                </s-text>
-              )}
-              {uploadStatus === "success" && (
-                <s-text color="success">
-                  {i18n.translate(
-                    "taxExemptionCard.certificateUploadedSuccessfully",
-                  )}
-                </s-text>
-              )}
-              {uploadStatus === "error" && (
-                <s-text color="critical">
-                  {i18n.translate("taxExemptionCard.certificateUploadFailed", {
-                    error: uploadError,
-                  })}
-                </s-text>
-              )}
-
-              <s-checkbox
-                checked={newTaxExemptionAttestation}
-                required
-                label={i18n.translate("taxExemptionCard.attestationLabel")}
-                onChange={(e) =>
-                  setNewTaxExemptionAttestation(e.target.checked)
-                }
-              />
+              <s-stack direction="inline" gap="base" justifyContent="end">
+                <s-button
+                  slot="secondary-actions"
+                  variant="secondary"
+                  disabled={loading}
+                  onClick={handleCancel}
+                >
+                  {i18n.translate("taxExemptionCard.cancel")}
+                </s-button>
+                <s-button
+                  slot="primary-action"
+                  type="submit"
+                  variant="primary"
+                  loading={loading}
+                  disabled={loading || !canSubmit}
+                >
+                  {i18n.translate("taxExemptionCard.save")}
+                </s-button>
+              </s-stack>
             </s-stack>
-
-            <s-stack direction="inline" gap="base" justifyContent="end">
-              <s-button
-                slot="secondary-actions"
-                variant="secondary"
-                disabled={loading}
-                onClick={handleCancel}
-              >
-                {i18n.translate("taxExemptionCard.cancel")}
-              </s-button>
-              <s-button
-                slot="primary-action"
-                type="submit"
-                variant="primary"
-                loading={loading}
-                disabled={
-                  loading ||
-                  !newTaxExemptionAttestation ||
-                  !hasCertificate
-                }
-              >
-                {i18n.translate("taxExemptionCard.save")}
-              </s-button>
-            </s-stack>
-          </s-stack>
-        </s-form>
-      </s-modal>
+          </s-form>
+        </s-modal>
+      )}
     </>
   );
 }
 
-async function getTaxExemptionFields() {
+/** Metafield selection shared by the customer and company location queries. */
+const TAX_EXEMPTION_METAFIELDS_FRAGMENT = `
+  taxExemptionType: metafield(namespace: $namespace, key: "tax_exemption_type") {
+    value
+  }
+  taxExemptionCertificate: metafield(namespace: $namespace, key: "tax_exemption_certificate") {
+    value
+    reference {
+      ... on GenericFile {
+        url
+        originalFileSize
+        mimeType
+      }
+    }
+  }
+  taxExemptionAttestation: metafield(namespace: $namespace, key: "tax_exemption_attestation") {
+    value
+  }
+  taxExemptionExpiration: metafield(namespace: $namespace, key: "tax_exemption_certification_expiration") {
+    value
+  }
+`;
+
+/**
+ * Pull the certificate's public URL and a display filename out of the
+ * file_reference metafield.
+ */
+function readCertificate(node) {
+  let certificateFilename = null;
+  let certificateUrl = null;
+  const fileRef = node?.taxExemptionCertificate?.reference;
+  if (fileRef?.url) {
+    certificateUrl = fileRef.url;
+    try {
+      const url = new URL(fileRef.url);
+      const pathParts = url.pathname.split("/");
+      certificateFilename = decodeURIComponent(pathParts[pathParts.length - 1]);
+    } catch (e) {
+      console.warn("Could not extract filename from URL:", e);
+    }
+  }
+  return { certificateFilename, certificateUrl };
+}
+
+function readTaxExemptionFields(node) {
+  const { certificateFilename, certificateUrl } = readCertificate(node);
+  return {
+    taxExemptionType: node?.taxExemptionType?.value,
+    taxExemptionCertificate: node?.taxExemptionCertificate?.value,
+    certificateFilename,
+    certificateUrl,
+    taxExemptionAttestation: node?.taxExemptionAttestation?.value === "true",
+    taxExemptionExpiration: node?.taxExemptionExpiration?.value,
+  };
+}
+
+const EMPTY_CUSTOMER = {
+  customerId: null,
+  taxExemptionType: null,
+  taxExemptionCertificate: null,
+  certificateFilename: null,
+  certificateUrl: null,
+  taxExemptionAttestation: false,
+  taxExemptionExpiration: null,
+};
+
+async function getTaxExemptionData() {
   const response = await fetch(
     "shopify:customer-account/api/2026-01/graphql.json",
     {
@@ -456,24 +735,35 @@ async function getTaxExemptionFields() {
         query: `query taxExemptionFields($namespace: String!) {
           customer {
             id
-            taxExemptionType: metafield(namespace: $namespace, key: "tax_exemption_type") {
-              value
-            }
-            taxExemptionCertificate: metafield(namespace: $namespace, key: "tax_exemption_certificate") {
-              value
-              reference {
-                ... on GenericFile {
-                  url
-                  originalFileSize
-                  mimeType
+            ${TAX_EXEMPTION_METAFIELDS_FRAGMENT}
+            companyContacts(first: 10) {
+              edges {
+                node {
+                  id
+                  locations(first: 50) {
+                    edges {
+                      node {
+                        id
+                        name
+                        taxIdentifier
+                        roleAssignments(first: 250) {
+                          edges {
+                            node {
+                              contact {
+                                id
+                              }
+                              role {
+                                name
+                              }
+                            }
+                          }
+                        }
+                        ${TAX_EXEMPTION_METAFIELDS_FRAGMENT}
+                      }
+                    }
+                  }
                 }
               }
-            }
-            taxExemptionAttestation: metafield(namespace: $namespace, key: "tax_exemption_attestation") {
-              value
-            }
-            taxExemptionExpiration: metafield(namespace: $namespace, key: "tax_exemption_certification_expiration") {
-              value
             }
           }
         }`,
@@ -491,49 +781,59 @@ async function getTaxExemptionFields() {
     console.error("GraphQL errors:", JSON.stringify(json.errors, null, 2));
   }
 
-  const data = json.data;
-  if (!data?.customer) {
+  const customerNode = json.data?.customer;
+  if (!customerNode) {
     console.error("No customer data returned");
-    return {
-      customerId: null,
-      taxExemptionType: null,
-      taxExemptionCertificate: null,
-      certificateFilename: null,
-      certificateUrl: null,
-      taxExemptionAttestation: false,
-      taxExemptionExpiration: null,
-    };
+    return { customer: EMPTY_CUSTOMER, locations: [] };
   }
 
-  // Extract filename and URL from file reference if available
-  let certificateFilename = null;
-  let certificateUrl = null;
-  const fileRef = data.customer.taxExemptionCertificate?.reference;
-  if (fileRef?.url) {
-    certificateUrl = fileRef.url;
-    try {
-      const url = new URL(fileRef.url);
-      const pathParts = url.pathname.split("/");
-      certificateFilename = decodeURIComponent(pathParts[pathParts.length - 1]);
-    } catch (e) {
-      console.warn("Could not extract filename from URL:", e);
+  const customer = {
+    customerId: customerNode.id,
+    ...readTaxExemptionFields(customerNode),
+  };
+
+  const locations = [];
+  const seenLocationIds = new Set();
+
+  for (const contactEdge of customerNode.companyContacts?.edges ?? []) {
+    const contact = contactEdge.node;
+
+    for (const locationEdge of contact.locations?.edges ?? []) {
+      const location = locationEdge.node;
+
+      // A customer can hold more than one contact record; de-duplicate so a
+      // location never renders twice.
+      if (seenLocationIds.has(location.id)) {
+        continue;
+      }
+      seenLocationIds.add(location.id);
+
+      const canEdit = (location.roleAssignments?.edges ?? []).some(
+        ({ node }) =>
+          node.contact?.id === contact.id &&
+          node.role?.name?.trim().toLowerCase() === LOCATION_ADMIN_ROLE_NAME,
+      );
+
+      locations.push({
+        id: location.id,
+        name: location.name,
+        taxIdentifier: location.taxIdentifier ?? "",
+        canEdit,
+        ...readTaxExemptionFields(location),
+      });
     }
   }
 
-  return {
-    customerId: data.customer.id,
-    taxExemptionType: data.customer.taxExemptionType?.value,
-    taxExemptionCertificate: data.customer.taxExemptionCertificate?.value,
-    certificateFilename,
-    certificateUrl,
-    taxExemptionAttestation:
-      data.customer.taxExemptionAttestation?.value === "true",
-    taxExemptionExpiration: data.customer.taxExemptionExpiration?.value,
-  };
+  return { customer, locations };
 }
 
+/**
+ * Write the type and attestation metafields. The Customer Account API accepts
+ * metafieldsSet for both Customer and CompanyLocation owners, so the same
+ * mutation covers both card kinds.
+ */
 async function saveTaxExemptionFields(
-  customerId,
+  ownerId,
   taxExemptionType,
   taxExemptionAttestation,
 ) {
@@ -563,14 +863,14 @@ async function saveTaxExemptionFields(
               key: "tax_exemption_type",
               namespace: "$app",
               type: "single_line_text_field",
-              ownerId: customerId,
+              ownerId,
               value: taxExemptionType ?? "",
             },
             {
               key: "tax_exemption_attestation",
               namespace: "$app",
               type: "boolean",
-              ownerId: customerId,
+              ownerId,
               value: taxExemptionAttestation ? "true" : "false",
             },
           ],
@@ -587,6 +887,14 @@ async function saveTaxExemptionFields(
 
   if (json.errors) {
     console.error("GraphQL errors:", JSON.stringify(json.errors, null, 2));
+    throw new Error(
+      json.errors[0]?.message || "Failed to save tax exemption fields",
+    );
+  }
+
+  const userErrors = json.data?.metafieldsSet?.userErrors ?? [];
+  if (userErrors.length > 0) {
+    throw new Error(userErrors[0].message);
   }
 
   const metafields = json.data?.metafieldsSet?.metafields || [];
@@ -599,4 +907,35 @@ async function saveTaxExemptionFields(
     type: typeField?.value ?? "",
     attestation: attestationField?.value === "true",
   };
+}
+
+/**
+ * Save a company location's built-in Tax ID.
+ *
+ * The Customer Account API exposes this as the read-only `taxIdentifier` field,
+ * so the write goes through the worker, which uses the Admin API's
+ * companyLocationTaxSettingsUpdate mutation after re-checking the caller's role.
+ */
+async function saveLocationTaxIdentifier(companyLocationId, taxRegistrationId) {
+  const sessionToken = await shopify.sessionToken.get();
+
+  const response = await fetch(`${WORKER_URL}/api/b2b/location-tax-id`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${sessionToken}`,
+    },
+    body: JSON.stringify({
+      companyLocationId,
+      taxRegistrationId: taxRegistrationId ?? "",
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to save Tax ID");
+  }
+
+  const result = await response.json();
+  return result.taxRegistrationId ?? "";
 }

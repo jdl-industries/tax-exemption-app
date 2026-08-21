@@ -204,7 +204,9 @@ export async function getAdminClient(
   shopDomain: string,
   context: AppLoadContext
 ) {
-  const apiVersion = "2024-10";
+  // 2025-01 is the first version with CompanyLocation.taxSettings and the
+  // companyLocationTaxSettingsUpdate mutation; 2025-10 matches .graphqlrc.ts.
+  const apiVersion = "2025-10";
   let accessToken = await getAccessToken(shopDomain, context);
 
   return {

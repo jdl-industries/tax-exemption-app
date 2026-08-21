@@ -1,8 +1,11 @@
 {
   "taxExemptionCard": {
     "heading": "Exonération fiscale",
+    "locationHeading": "Exonération fiscale",
+    "taxIdLabel": "Numéro d'identification fiscale",
     "add": "Ajouter",
     "edit": "Modifier le type d'exonération fiscale",
+    "editAction": "Modifier",
     "modalHeading": "Modifier l'exonération fiscale",
     "cancel": "Annuler",
     "save": "Enregistrer",
@@ -15,8 +18,9 @@
     "uploaded": "Téléchargé",
     "uploading": "Téléchargement...",
     "certificateUploadedSuccessfully": "Certificat téléchargé avec succès",
-    "certificateUploadFailed": "Échec du téléchargement du certificat : {error}",
+    "certificateUploadFailed": "Échec du téléchargement du certificat : {{error}}",
     "notUploaded": "Non téléchargé",
+    "fileSelected": "Prêt à téléverser",
     "expirationLabel": "Date d'expiration",
     "selectType": "Sélectionnez un type...",
     "resale": "Revente",
@@ -25,7 +29,6 @@
     "other": "Autre",
     "underReview": "En cours de révision",
     "approved": "Approuvé",
-    "currentFile": "Fichier actuel",
     "addFile": "Ajouter un fichier",
     "updateFile": "Mettre à jour le fichier"
   }

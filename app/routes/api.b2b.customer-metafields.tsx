@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getAdminClient, extractShopDomain } from "../lib/shopify-client-credentials";
+import { isCompanyLocationGid, verifyLocationAdmin } from "../lib/company-location-auth";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -29,20 +30,37 @@ export const action = async ({ request, context }: ActionFunctionArgs) => {
     );
   };
 
-  const body = await request.json();
-  const { customerId, namespace, metafieldKey, resourceUrl } = body;
+  const body = (await request.json()) as {
+    customerId?: string;
+    ownerId?: string;
+    namespace?: string;
+    metafieldKey?: string;
+    resourceUrl?: string;
+  };
+  const { customerId, ownerId: rawOwnerId, namespace, metafieldKey, resourceUrl } = body;
 
-  if (!customerId || !metafieldKey || !resourceUrl) {
+  // `ownerId` is the current field; `customerId` is kept for older extension
+  // builds that only ever wrote to the logged-in customer.
+  const ownerId = rawOwnerId ?? customerId;
+
+  if (!ownerId || !metafieldKey || !resourceUrl) {
     return respond(
-      { error: "Missing required fields: customerId, metafieldKey, resourceUrl" },
+      { error: "Missing required fields: ownerId, metafieldKey, resourceUrl" },
       400
     );
   }
 
-  // Validate that the customer ID in the request matches the session token
-  // The session token's `sub` claim contains the customer GID
-  if (sessionToken.sub && sessionToken.sub !== customerId) {
-    return respond({ error: "Unauthorized: customer ID mismatch" }, 403);
+  // The session token's `sub` claim contains the logged-in customer's GID.
+  if (!sessionToken.sub) {
+    return respond({ error: "Invalid session token: missing sub" }, 401);
+  }
+
+  const isLocationOwner = isCompanyLocationGid(ownerId);
+
+  // A customer may only ever write to their own record. Anything that is not
+  // their own customer GID has to be a company location they administer.
+  if (!isLocationOwner && sessionToken.sub !== ownerId) {
+    return respond({ error: "Unauthorized: owner ID mismatch" }, 403);
   }
 
   // Get shop domain from session token dest claim
@@ -61,6 +79,15 @@ export const action = async ({ request, context }: ActionFunctionArgs) => {
 
   // Get admin client using Client Credentials Grant (cached token)
   const admin = await getAdminClient(shopDomain, context);
+
+  // For a company location owner, confirm from the Admin API that this customer
+  // holds the Location admin role there rather than trusting the request body.
+  if (isLocationOwner) {
+    const check = await verifyLocationAdmin(admin, sessionToken.sub, ownerId);
+    if (!check.authorized) {
+      return respond({ error: check.reason ?? "Forbidden" }, 403);
+    }
+  }
 
   // Step 1: Create a File object from the staged upload resourceUrl
   // The resourceUrl from staged uploads is a CDN URL, but file_reference metafields
@@ -141,7 +168,7 @@ export const action = async ({ request, context }: ActionFunctionArgs) => {
     {
       metafields: [
         {
-          ownerId: customerId,
+          ownerId,
           namespace: namespace || "$app",
           key: metafieldKey,
           type: "file_reference",

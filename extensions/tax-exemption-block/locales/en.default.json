@@ -1,8 +1,11 @@
 {
   "taxExemptionCard": {
     "heading": "Tax Exemption",
+    "locationHeading": "Tax Exemption",
+    "taxIdLabel": "Tax ID",
     "add": "Add",
     "edit": "Edit tax exemption type",
+    "editAction": "Edit",
     "modalHeading": "Edit Tax Exemption",
     "cancel": "Cancel",
     "save": "Save",
@@ -17,6 +20,7 @@
     "certificateUploadedSuccessfully": "Certificate uploaded successfully",
     "certificateUploadFailed": "Certificate upload failed: {{error}}",
     "notUploaded": "Not uploaded",
+    "fileSelected": "Ready to upload",
     "expirationLabel": "Expiration date",
     "selectType": "Select a type...",
     "resale": "Resale",
@@ -25,7 +29,6 @@
     "other": "Other",
     "underReview": "Under Review",
     "approved": "Approved",
-    "currentFile": "Current file",
     "addFile": "Add file",
     "updateFile": "Update file"
   }

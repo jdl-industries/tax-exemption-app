@@ -63,3 +63,45 @@ name = "Tax Exemption Attestation"
 description = "Customer confirmation of tax exempt status"
 access.customer_account = "read_write"
 access.admin = "merchant_read_write"
+
+# ---------------------------------------------------------------------------
+# B2B company location metafields.
+#
+# These mirror the customer metafields above so that a B2B contact who is a
+# "Location admin" can maintain exemption documentation for the company
+# location itself rather than for their personal customer record.
+#
+# The location's Tax ID is NOT a metafield -- it is the built-in
+# CompanyLocation.taxSettings.taxRegistrationId, written through the worker
+# with the companyLocationTaxSettingsUpdate mutation.
+# ---------------------------------------------------------------------------
+
+[company_location.metafields.app.tax_exemption_type]
+type = "single_line_text_field"
+name = "Tax Exemption Type"
+description = "The reason this company location is tax exempt"
+access.customer_account = "read_write"
+access.admin = "merchant_read_write"
+[company_location.metafields.app.tax_exemption_type.validations]
+choices = ["Resale", "Government/Military", "Manufacturing/Industrial", "Other"]
+
+[company_location.metafields.app.tax_exemption_certificate]
+type = "file_reference"
+name = "Tax Exemption Certificate"
+description = "Uploaded tax exemption document for this company location"
+access.customer_account = "read_write"
+access.admin = "merchant_read_write"
+
+[company_location.metafields.app.tax_exemption_certification_expiration]
+type = "date"
+name = "Tax Exemption Expiration"
+description = "The date when this company location's exemption certificate expires"
+access.customer_account = "read_write"
+access.admin = "merchant_read_write"
+
+[company_location.metafields.app.tax_exemption_attestation]
+type = "boolean"
+name = "Tax Exemption Attestation"
+description = "Company location admin confirmation of tax exempt status"
+access.customer_account = "read_write"
+access.admin = "merchant_read_write"

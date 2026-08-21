@@ -46,7 +46,9 @@ export default defineConfig({
     hmr: hmrConfig,
     fs: {
       // See https://vitejs.dev/config/server-options.html#server-fs-allow for more information
-      allow: ["app", "node_modules"],
+      // "workers" is required: wrangler.jsonc points `main` at ./workers/app.ts,
+      // and the Cloudflare plugin loads that entry through the dev server.
+      allow: ["app", "workers", "node_modules"],
     },
   },
   plugins: [

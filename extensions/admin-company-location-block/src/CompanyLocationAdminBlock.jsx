@@ -20,10 +20,10 @@ function Extension() {
   // react-hooks/rules-of-hooks flags. The fallback render happens after every
   // hook has run.
   const shopifyApi = typeof shopify === "undefined" ? null : shopify;
-  const customerId = shopifyApi?.data?.selected?.[0]?.id;
+  const companyLocationId = shopifyApi?.data?.selected?.[0]?.id;
 
   useEffect(() => {
-    if (!shopifyApi || !customerId) {
+    if (!shopifyApi || !companyLocationId) {
       setLoading(false);
       return;
     }
@@ -31,9 +31,14 @@ function Extension() {
     async function fetchTaxExemptionData() {
       try {
         const result = await shopifyApi.query(
-          `query GetCustomerTaxExemption($id: ID!) {
-            customer(id: $id) {
-              taxExempt
+          `query GetCompanyLocationTaxExemption($id: ID!) {
+            companyLocation(id: $id) {
+              id
+              name
+              taxSettings {
+                taxExempt
+                taxRegistrationId
+              }
               taxExemptionType: metafield(namespace: "$app", key: "tax_exemption_type") {
                 value
               }
@@ -53,19 +58,19 @@ function Extension() {
               }
             }
           }`,
-          { variables: { id: customerId } },
+          { variables: { id: companyLocationId } },
         );
 
         if (result.errors) {
           console.error("GraphQL errors:", result.errors);
           setError("Failed to load tax exemption data");
         } else {
-          const customer = result.data?.customer;
-          if (customer) {
+          const location = result.data?.companyLocation;
+          if (location) {
             // Extract filename from file URL if available
             let certificateFilename = null;
             let certificateUrl = null;
-            const fileRef = customer.taxExemptionCertificate?.reference;
+            const fileRef = location.taxExemptionCertificate?.reference;
             if (fileRef?.url) {
               certificateUrl = fileRef.url;
               try {
@@ -79,15 +84,16 @@ function Extension() {
               }
             }
 
-            const expiration = customer.taxExemptionExpiration?.value || null;
+            const expiration = location.taxExemptionExpiration?.value || null;
             setTaxData({
-              type: customer.taxExemptionType?.value || null,
-              certificate: customer.taxExemptionCertificate?.value || null,
+              type: location.taxExemptionType?.value || null,
+              certificate: location.taxExemptionCertificate?.value || null,
               certificateFilename,
               certificateUrl,
-              attestation: customer.taxExemptionAttestation?.value === "true",
+              attestation: location.taxExemptionAttestation?.value === "true",
               expiration,
-              taxExempt: customer.taxExempt || false,
+              taxExempt: location.taxSettings?.taxExempt || false,
+              taxRegistrationId: location.taxSettings?.taxRegistrationId || null,
             });
             setExpirationValue(expiration || "");
           }
@@ -101,7 +107,7 @@ function Extension() {
     }
 
     fetchTaxExemptionData();
-  }, [shopifyApi, customerId]);
+  }, [shopifyApi, companyLocationId]);
 
   // Determine if a date is in the future (or today)
   const isDateInFuture = (dateString) => {
@@ -112,20 +118,23 @@ function Extension() {
     return expirationDate >= today;
   };
 
-  // Save expiration date and update customer tax exempt status
+  // Save expiration date and update the location's tax settings.
+  //
+  // Approving (an expiration date in the future) also flips the location's tax
+  // settings to "Don't collect tax" so the exemption actually takes effect at
+  // checkout; clearing or back-dating it re-enables tax collection.
   const handleSaveExpiration = async () => {
-    if (!shopifyApi || !customerId) return;
+    if (!shopifyApi || !companyLocationId) return;
 
     setSaving(true);
     setSaveError(null);
 
-    // Determine tax exempt status based on expiration date
     const shouldBeTaxExempt = isDateInFuture(expirationValue);
 
     try {
       // Update the expiration metafield
       const metafieldResult = await shopifyApi.query(
-        `mutation SetCustomerExpirationDate($metafields: [MetafieldsSetInput!]!) {
+        `mutation SetLocationExpirationDate($metafields: [MetafieldsSetInput!]!) {
           metafieldsSet(metafields: $metafields) {
             metafields {
               key
@@ -141,7 +150,7 @@ function Extension() {
           variables: {
             metafields: [
               {
-                ownerId: customerId,
+                ownerId: companyLocationId,
                 namespace: "$app",
                 key: "tax_exemption_certification_expiration",
                 type: "date",
@@ -164,13 +173,18 @@ function Extension() {
         return;
       }
 
-      // Update the customer's tax exempt status
-      const customerResult = await shopifyApi.query(
-        `mutation UpdateCustomerTaxExempt($input: CustomerInput!) {
-          customerUpdate(input: $input) {
-            customer {
+      // Update the location's tax settings to match
+      const taxSettingsResult = await shopifyApi.query(
+        `mutation UpdateLocationTaxSettings($companyLocationId: ID!, $taxExempt: Boolean) {
+          companyLocationTaxSettingsUpdate(
+            companyLocationId: $companyLocationId
+            taxExempt: $taxExempt
+          ) {
+            companyLocation {
               id
-              taxExempt
+              taxSettings {
+                taxExempt
+              }
             }
             userErrors {
               field
@@ -180,22 +194,22 @@ function Extension() {
         }`,
         {
           variables: {
-            input: {
-              id: customerId,
-              taxExempt: shouldBeTaxExempt,
-            },
+            companyLocationId,
+            taxExempt: shouldBeTaxExempt,
           },
         },
       );
 
       if (
-        customerResult.errors ||
-        customerResult.data?.customerUpdate?.userErrors?.length > 0
+        taxSettingsResult.errors ||
+        taxSettingsResult.data?.companyLocationTaxSettingsUpdate?.userErrors
+          ?.length > 0
       ) {
         const errorMsg =
-          customerResult.errors?.[0]?.message ||
-          customerResult.data?.customerUpdate?.userErrors?.[0]?.message ||
-          "Failed to update tax exempt status";
+          taxSettingsResult.errors?.[0]?.message ||
+          taxSettingsResult.data?.companyLocationTaxSettingsUpdate
+            ?.userErrors?.[0]?.message ||
+          "Failed to update tax settings";
         setSaveError(errorMsg);
         return;
       }
@@ -225,14 +239,14 @@ function Extension() {
       !!taxData.attestation ||
       !!taxData.expiration);
 
-  // Determine status based on expiration date and tax exempt flag
+  // Determine status based on expiration date and the location's tax settings
   const getStatus = () => {
     if (!taxData?.expiration) {
       return { label: "Under Review", tone: "warning" };
     }
     const isExpired = !isDateInFuture(taxData.expiration);
     if (isExpired) {
-      // Expired - show critical if still tax exempt (needs attention)
+      // Expired - show critical if the location is still exempt (needs attention)
       if (taxData.taxExempt) {
         return { label: "Expired", tone: "critical" };
       }
@@ -281,9 +295,12 @@ function Extension() {
       collapsedSummary={getCollapsedSummary()}
     >
       {hasAnyFieldSet ? (
+        /* Seven rows: status, tax collection, tax ID, type, certificate,
+           attestation, expiration. The expiration row is auto-height because
+           it holds the date field, save button and helper text. */
         <s-grid
-          gridTemplateColumns="100px 1fr"
-          gridTemplateRows="36px 36px 36px 36px 36px"
+          gridTemplateColumns="140px 1fr"
+          gridTemplateRows="36px 36px 36px 36px 36px 36px auto"
           alignItems="center"
         >
           <s-grid-item>
@@ -299,6 +316,22 @@ function Extension() {
             {status.tone === "critical" && (
               <s-badge tone="critical">{status.label}</s-badge>
             )}
+          </s-grid-item>
+
+          <s-grid-item>
+            <s-text color="subdued">Tax collection:</s-text>
+          </s-grid-item>
+          <s-grid-item>
+            <s-text>
+              {taxData?.taxExempt ? "Don't collect tax" : "Collect tax"}
+            </s-text>
+          </s-grid-item>
+
+          <s-grid-item>
+            <s-text color="subdued">Tax ID:</s-text>
+          </s-grid-item>
+          <s-grid-item>
+            <s-text>{taxData?.taxRegistrationId || "Not set"}</s-text>
           </s-grid-item>
 
           <s-grid-item>
@@ -353,6 +386,13 @@ function Extension() {
                 </s-button>
               )}
             </s-stack>
+            {expirationChanged && (
+              <s-text color="subdued">
+                {isDateInFuture(expirationValue)
+                  ? "Saving will approve the exemption and stop collecting tax for this location."
+                  : "Saving will resume collecting tax for this location."}
+              </s-text>
+            )}
             {saveError && <s-banner tone="critical">{saveError}</s-banner>}
           </s-grid-item>
         </s-grid>

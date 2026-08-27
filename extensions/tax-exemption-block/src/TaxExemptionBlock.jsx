@@ -14,6 +14,32 @@ const WORKER_URL = "https://tax-exemption-service.jdlindustries.workers.dev";
  */
 const LOCATION_ADMIN_ROLE_NAME = "location admin";
 
+/**
+ * Buyers paying on a Tax Free Credit Card have no certificate to produce -- the
+ * card itself carries the exemption -- so this is the one type that submits
+ * without a document.
+ *
+ * These values are stored verbatim in the tax_exemption_type metafield and are
+ * what the admin blocks display, so they must stay in step with the `choices`
+ * validation in shopify.app.toml.
+ */
+const TAX_FREE_CREDIT_CARD_TYPE =
+  "Government/Military (using Tax Free Credit Card)";
+
+/** The Government/Military type whose certificate is a completed SF-1094. */
+const FORM_1094_TYPE = "Government/Military (1094 required)";
+
+/**
+ * Blank fillable SF-1094, hosted on the shop's own Files CDN so buyers who pick
+ * that type can fetch, complete and sign one without leaving the flow.
+ */
+const FORM_1094_URL =
+  "https://cdn.shopify.com/s/files/1/0750/8767/5550/files/SF1094-15c.pdf?v=1787857921";
+
+function certificateRequiredFor(taxExemptionType) {
+  return taxExemptionType !== TAX_FREE_CREDIT_CARD_TYPE;
+}
+
 export default async () => {
   const { customer, locations } = await getTaxExemptionData();
 
@@ -174,6 +200,11 @@ function TaxExemptionCard(props) {
   const hasCertificate = !!taxExemptionCertificate || !!pendingFile;
   const displayFilename = pendingFile?.name || certificateFilename;
 
+  // Whether the type currently chosen in the modal calls for a document, and
+  // whether the already-saved type did -- the card view follows the saved value.
+  const certificateRequired = certificateRequiredFor(newTaxExemptionType);
+  const savedCertificateRequired = certificateRequiredFor(taxExemptionType);
+
   // Show exempt view if any field has been set. The Tax ID is deliberately not
   // part of this: Shopify already surfaces it natively on the location page, so
   // it's edit-only here and shouldn't make an otherwise-empty card look filled.
@@ -223,6 +254,20 @@ function TaxExemptionCard(props) {
     setPendingFile(file);
     setUploadStatus(null);
     setUploadError(null);
+  };
+
+  const handleTypeChange = (event) => {
+    const type = event.target.value;
+    setNewTaxExemptionType(type);
+
+    // Switching to a type that needs no document has to discard any file the
+    // buyer already picked -- the drop-zone is about to disappear, and Save
+    // would otherwise upload a certificate the chosen type never asked for.
+    if (!certificateRequiredFor(type)) {
+      setPendingFile(null);
+      setUploadStatus(null);
+      setUploadError(null);
+    }
   };
 
   // Upload file to Shopify and save metafield reference against the owner
@@ -304,9 +349,12 @@ function TaxExemptionCard(props) {
   // The Tax ID is independent of the exemption paperwork: a location admin may
   // record it without ever uploading a certificate.
   const taxIdChanged = isLocation && newTaxIdentifier !== taxIdentifier;
-  // An exemption submission is only valid with both a certificate and an
-  // attestation, exactly as before.
-  const exemptionReady = hasCertificate && newTaxExemptionAttestation;
+  // An exemption submission needs a certificate and an attestation -- except on
+  // the Tax Free Credit Card type, where there is no document to supply and the
+  // attestation alone completes it.
+  const exemptionReady = certificateRequired
+    ? hasCertificate && newTaxExemptionAttestation
+    : newTaxExemptionAttestation;
   // A Tax ID-only save is allowed, but never while a chosen file is waiting --
   // otherwise the certificate would upload without its attestation.
   const canSubmit = exemptionReady || (taxIdChanged && !pendingFile);
@@ -459,28 +507,33 @@ function TaxExemptionCard(props) {
                       i18n.translate("taxExemptionCard.notSet")}
                   </s-text>
                 </s-stack>
-                <s-stack direction="block">
-                  <s-text color="subdued">
-                    {i18n.translate("taxExemptionCard.certificateLabel")}
-                  </s-text>
-                  {taxExemptionCertificate ? (
-                    certificateUrl ? (
-                      <s-link href={certificateUrl} target="_blank">
-                        {displayFilename ||
-                          i18n.translate("taxExemptionCard.uploaded")}
-                      </s-link>
+                {/* Types that carry their own proof -- the Tax Free Credit
+                  Card -- have no certificate to report, so the row is dropped
+                  rather than left reading "Not uploaded". */}
+                {savedCertificateRequired && (
+                  <s-stack direction="block">
+                    <s-text color="subdued">
+                      {i18n.translate("taxExemptionCard.certificateLabel")}
+                    </s-text>
+                    {taxExemptionCertificate ? (
+                      certificateUrl ? (
+                        <s-link href={certificateUrl} target="_blank">
+                          {displayFilename ||
+                            i18n.translate("taxExemptionCard.uploaded")}
+                        </s-link>
+                      ) : (
+                        <s-text>
+                          {displayFilename ||
+                            i18n.translate("taxExemptionCard.uploaded")}
+                        </s-text>
+                      )
                     ) : (
                       <s-text>
-                        {displayFilename ||
-                          i18n.translate("taxExemptionCard.uploaded")}
+                        {i18n.translate("taxExemptionCard.notUploaded")}
                       </s-text>
-                    )
-                  ) : (
-                    <s-text>
-                      {i18n.translate("taxExemptionCard.notUploaded")}
-                    </s-text>
-                  )}
-                </s-stack>
+                    )}
+                  </s-stack>
+                )}
                 <s-stack direction="block">
                   <s-text color="subdued">
                     {i18n.translate("taxExemptionCard.expirationLabel")}
@@ -534,7 +587,7 @@ function TaxExemptionCard(props) {
                 <s-select
                   label={i18n.translate("taxExemptionCard.typeLabel")}
                   value={newTaxExemptionType}
-                  onChange={(e) => setNewTaxExemptionType(e.target.value)}
+                  onChange={handleTypeChange}
                 >
                   <s-option value="">
                     {i18n.translate("taxExemptionCard.selectType")}
@@ -542,7 +595,12 @@ function TaxExemptionCard(props) {
                   <s-option value="Resale">
                     {i18n.translate("taxExemptionCard.resale")}
                   </s-option>
-                  <s-option value="Government/Military">
+                  <s-option value={TAX_FREE_CREDIT_CARD_TYPE}>
+                    {i18n.translate(
+                      "taxExemptionCard.governmentMilitaryCreditCard",
+                    )}
+                  </s-option>
+                  <s-option value={FORM_1094_TYPE}>
                     {i18n.translate("taxExemptionCard.governmentMilitary")}
                   </s-option>
                   <s-option value="Manufacturing/Industrial">
@@ -553,82 +611,118 @@ function TaxExemptionCard(props) {
                   </s-option>
                 </s-select>
 
-                {/*
-                  s-drop-zone doesn't surface the chosen file itself, so the
-                  filename is rendered here. Give it a bordered row and a badge
-                  when the file is newly picked -- as plain text under a label it
-                  read as static copy and the selection went unnoticed.
-                */}
-                <s-stack direction="block" gap="small">
-                  <s-text color="subdued">
-                    {i18n.translate("taxExemptionCard.certificateLabel")}
-                  </s-text>
-                  {displayFilename && (
-                    <s-stack
-                      direction="inline"
-                      gap="base"
-                      alignItems="center"
-                      background="subdued"
-                      borderWidth="base"
-                      borderRadius="base"
-                      padding="base"
-                    >
-                      <s-text>{displayFilename}</s-text>
-                      {pendingFile && (
-                        <s-badge tone="info">
-                          {i18n.translate("taxExemptionCard.fileSelected")}
-                        </s-badge>
+                {/* Sits between the type and the drop-zone so the form is
+                  offered in the order it's needed: pick the type, fetch the
+                  blank form, upload the completed one. */}
+                {newTaxExemptionType === FORM_1094_TYPE && (
+                  <s-stack direction="block" gap="small-100">
+                    <s-paragraph>
+                      {i18n.translate("taxExemptionCard.form1094Help")}
+                    </s-paragraph>
+                    <s-link href={FORM_1094_URL} target="_blank">
+                      {i18n.translate("taxExemptionCard.form1094LinkLabel")}
+                    </s-link>
+                  </s-stack>
+                )}
+
+                {certificateRequired && (
+                  <>
+                    {/*
+                      s-drop-zone doesn't surface the chosen file itself, so the
+                      filename is rendered here. Give it a bordered row and a
+                      badge when the file is newly picked -- as plain text under
+                      a label it read as static copy and the selection went
+                      unnoticed.
+                    */}
+                    <s-stack direction="block" gap="small">
+                      <s-text color="subdued">
+                        {i18n.translate("taxExemptionCard.certificateLabel")}
+                      </s-text>
+                      {displayFilename && (
+                        <s-stack
+                          direction="inline"
+                          gap="base"
+                          alignItems="center"
+                          background="subdued"
+                          borderWidth="base"
+                          borderRadius="base"
+                          padding="base"
+                        >
+                          <s-text>{displayFilename}</s-text>
+                          {pendingFile && (
+                            <s-badge tone="info">
+                              {i18n.translate("taxExemptionCard.fileSelected")}
+                            </s-badge>
+                          )}
+                        </s-stack>
                       )}
                     </s-stack>
-                  )}
-                </s-stack>
 
-                <s-drop-zone
-                  label={
-                    hasCertificate
-                      ? i18n.translate("taxExemptionCard.updateFile")
-                      : i18n.translate("taxExemptionCard.addFile")
-                  }
-                  accessibilityLabel={i18n.translate(
-                    "taxExemptionCard.certificateLabel",
-                  )}
-                  accept=".pdf,.jpg,.jpeg,.png,.gif"
-                  disabled={loading}
-                  onChange={handleFileChange}
-                />
+                    <s-drop-zone
+                      label={
+                        hasCertificate
+                          ? i18n.translate("taxExemptionCard.updateFile")
+                          : i18n.translate("taxExemptionCard.addFile")
+                      }
+                      accessibilityLabel={i18n.translate(
+                        "taxExemptionCard.certificateLabel",
+                      )}
+                      accept=".pdf,.jpg,.jpeg,.png,.gif"
+                      disabled={loading}
+                      onChange={handleFileChange}
+                    />
 
-                {uploadStatus === "uploading" && (
-                  <s-text color="subdued">
-                    {i18n.translate("taxExemptionCard.uploading")}
-                  </s-text>
-                )}
-                {uploadStatus === "success" && (
-                  <s-text color="success">
-                    {i18n.translate(
-                      "taxExemptionCard.certificateUploadedSuccessfully",
+                    {uploadStatus === "uploading" && (
+                      <s-text color="subdued">
+                        {i18n.translate("taxExemptionCard.uploading")}
+                      </s-text>
                     )}
-                  </s-text>
-                )}
-                {uploadStatus === "error" && (
-                  <s-text color="critical">
-                    {i18n.translate(
-                      "taxExemptionCard.certificateUploadFailed",
-                      {
-                        error: uploadError,
-                      },
+                    {uploadStatus === "success" && (
+                      <s-text color="success">
+                        {i18n.translate(
+                          "taxExemptionCard.certificateUploadedSuccessfully",
+                        )}
+                      </s-text>
                     )}
-                  </s-text>
+                    {uploadStatus === "error" && (
+                      <s-text color="critical">
+                        {i18n.translate(
+                          "taxExemptionCard.certificateUploadFailed",
+                          {
+                            error: uploadError,
+                          },
+                        )}
+                      </s-text>
+                    )}
+                  </>
                 )}
-
-                <s-checkbox
-                  checked={newTaxExemptionAttestation}
-                  required={hasCertificate}
-                  label={i18n.translate("taxExemptionCard.attestationLabel")}
-                  onChange={(e) =>
-                    setNewTaxExemptionAttestation(e.target.checked)
-                  }
-                />
               </s-stack>
+
+              {/*
+                Kept outside the stack above, as a sibling of the button row,
+                so it always sits last. Inside it, it was the only child that
+                never unmounts while the drop-zone and the 1094 block come and
+                go with the chosen type, and the nodes appearing around it were
+                landing after it instead of before.
+
+                The two flows certify different things -- one that a document is
+                valid, the other that the card and the purchase qualify -- so
+                the copy follows the same predicate that shows the drop-zone,
+                and any future document-free type picks up the right wording
+                without further changes.
+              */}
+              <s-checkbox
+                checked={newTaxExemptionAttestation}
+                required={hasCertificate || !certificateRequired}
+                label={i18n.translate(
+                  certificateRequired
+                    ? "taxExemptionCard.attestationLabel"
+                    : "taxExemptionCard.attestationLabelNoCertificate",
+                )}
+                onChange={(e) =>
+                  setNewTaxExemptionAttestation(e.target.checked)
+                }
+              />
 
               <s-stack direction="inline" gap="base" justifyContent="end">
                 <s-button
@@ -828,84 +922,44 @@ async function getTaxExemptionData() {
 }
 
 /**
- * Write the type and attestation metafields. The Customer Account API accepts
- * metafieldsSet for both Customer and CompanyLocation owners, so the same
- * mutation covers both card kinds.
+ * Write the type and attestation metafields.
+ *
+ * This goes through the worker rather than straight to the Customer Account
+ * API: that API rejects metafieldsSet against a CompanyLocation owner with
+ * "Access to this namespace and key on Metafields for this resource type is not
+ * allowed". The worker re-checks the caller's role and writes through the Admin
+ * API, which is the same path the certificate and Tax ID already take.
  */
 async function saveTaxExemptionFields(
   ownerId,
   taxExemptionType,
   taxExemptionAttestation,
 ) {
-  const response = await fetch(
-    "shopify:customer-account/api/2026-01/graphql.json",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        query: `mutation saveTaxExemptionFields($metafields: [MetafieldsSetInput!]!) {
-          metafieldsSet(metafields: $metafields) {
-            metafields {
-              key
-              value
-            }
-            userErrors {
-              field
-              message
-            }
-          }
-        }`,
-        variables: {
-          metafields: [
-            {
-              key: "tax_exemption_type",
-              namespace: "$app",
-              type: "single_line_text_field",
-              ownerId,
-              value: taxExemptionType ?? "",
-            },
-            {
-              key: "tax_exemption_attestation",
-              namespace: "$app",
-              type: "boolean",
-              ownerId,
-              value: taxExemptionAttestation ? "true" : "false",
-            },
-          ],
-        },
-      }),
+  const sessionToken = await shopify.sessionToken.get();
+
+  const response = await fetch(`${WORKER_URL}/api/b2b/tax-exemption-fields`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${sessionToken}`,
     },
-  );
+    body: JSON.stringify({
+      ownerId,
+      taxExemptionType: taxExemptionType ?? "",
+      taxExemptionAttestation: !!taxExemptionAttestation,
+    }),
+  });
 
-  const json = await response.json();
-  console.log(
-    "Save tax exemption fields response:",
-    JSON.stringify(json, null, 2),
-  );
-
-  if (json.errors) {
-    console.error("GraphQL errors:", JSON.stringify(json.errors, null, 2));
-    throw new Error(
-      json.errors[0]?.message || "Failed to save tax exemption fields",
-    );
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to save tax exemption fields");
   }
 
-  const userErrors = json.data?.metafieldsSet?.userErrors ?? [];
-  if (userErrors.length > 0) {
-    throw new Error(userErrors[0].message);
-  }
-
-  const metafields = json.data?.metafieldsSet?.metafields || [];
-  const typeField = metafields.find((m) => m.key === "tax_exemption_type");
-  const attestationField = metafields.find(
-    (m) => m.key === "tax_exemption_attestation",
-  );
+  const result = await response.json();
 
   return {
-    type: typeField?.value ?? "",
-    attestation: attestationField?.value === "true",
+    type: result.type ?? "",
+    attestation: !!result.attestation,
   };
 }
 

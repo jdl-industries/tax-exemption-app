@@ -39,7 +39,13 @@ description = "The reason this customer is tax exempt"
 access.customer_account = "read_write"
 access.admin = "merchant_read_write"
 [customer.metafields.app.tax_exemption_type.validations]
-choices = ["Resale", "Government/Military", "Manufacturing/Industrial", "Other"]
+choices = [
+  "Resale",
+  "Government/Military (using Tax Free Credit Card)",
+  "Government/Military (1094 required)",
+  "Manufacturing/Industrial",
+  "Other",
+]
 
 # File type metafield for the tax exemption certificate
 [customer.metafields.app.tax_exemption_certificate]
@@ -83,7 +89,13 @@ description = "The reason this company location is tax exempt"
 access.customer_account = "read_write"
 access.admin = "merchant_read_write"
 [company_location.metafields.app.tax_exemption_type.validations]
-choices = ["Resale", "Government/Military", "Manufacturing/Industrial", "Other"]
+choices = [
+  "Resale",
+  "Government/Military (using Tax Free Credit Card)",
+  "Government/Military (1094 required)",
+  "Manufacturing/Industrial",
+  "Other",
+]
 
 [company_location.metafields.app.tax_exemption_certificate]
 type = "file_reference"
